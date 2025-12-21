@@ -25,3 +25,5 @@
 - Follow idiomatic Go patterns.
 - Adhere to the Manager-Worker architecture defined in `.design/swarm.md`.
 - Ensure all new commands are added via Cobra in the `cmd/` package.
+- **Do not update the local `.gswarm` folder directly.** It is populated during initialization (`gswarm init`).
+- **Any changes to the default template must be made in `pkg/config/init.go`** (the config init package), as that is where the seeding logic resides.

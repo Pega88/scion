@@ -10,7 +10,7 @@ A container-based orchestration tool for managing concurrent Gemini CLI agents.
 
 - **Parallelism**: Run multiple agents concurrently as independent processes.
 - **Isolation**: Strict separation of identities, credentials, and configuration.
-- **Context Management**: Dedicated git worktrees for each agent to prevent conflicts.
+- **Context Management**: Support for dedicated git worktrees when running within a git repository to prevent conflicts.
 - **Specialization**: Role-based agent configuration via templates.
 - **Interactivity**: Detached background operation with human-in-the-loop "attach" capability.
 

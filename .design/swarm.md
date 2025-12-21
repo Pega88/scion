@@ -18,9 +18,9 @@ The system follows a Manager-Worker architecture:
 
 ### 1. Swarms & Contexts
 
-A **Swarm** is the top-level logical container for a group of agents, typically scoped to a specific project.
+A **Swarm** is the top-level logical container for a group of agents.
 
-- **Project Swarm**: Linked to a git repository. The swarm name defaults to the repository directory name (e.g., `gemini-cli`). Resources are scoped to this project.
+- **Project Swarm**: Linked to a project directory. If the directory is a git repository, additional features like automatic worktree management become available. The swarm name defaults to the directory name (e.g., `my-app`).
 - **Playground Swarm**: A default global swarm (`playground`) for ad-hoc agents not tied to a specific project.
 
 ### 2. Agent Templates

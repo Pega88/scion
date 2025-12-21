@@ -8,6 +8,7 @@ This document proposes a design for propagating authentication credentials from 
 1.  **Gemini API Keys**: `GEMINI_API_KEY` or `GOOGLE_API_KEY`.
 2.  **Vertex AI Auth**: `VERTEX_API_KEY` or Service Account keys.
 3.  **GCP Project Context**: `GOOGLE_CLOUD_PROJECT` or `GCP_PROJECT`.
+4.  **OAuth Credentials**: `~/.gemini/oauth_creds.json` when `selectedType` is `oauth-personal`.
 
 The `gemini-cli` itself handles sandboxing by mounting host directories (like `~/.config/gcloud`) and selectively passing environment variables. `gswarm` should adopt a similar but more "agent-centric" approach.
 
@@ -27,6 +28,7 @@ The `gswarm` CLI (running on the host) will look for authentication markers in t
     - `GOOGLE_CLOUD_PROJECT` / `GCP_PROJECT`
 2.  **Global Settings**:
     - Reading `~/.gemini/settings.json` to extract keys if not present in the environment.
+    - Detecting if `selectedType` is `oauth-personal` and finding `oauth_creds.json`.
 
 ### 2. Injection (Runtime-side)
 
@@ -36,11 +38,17 @@ Once discovered, `gswarm` will inject these credentials into the agent runtime.
 For API keys, the simplest and most secure method for containers is environment variable injection.
 - The `RunConfig` in `pkg/runtime` will be updated to automatically include discovered auth environment variables.
 - Runtimes (Docker/Apple) will append these to the `run` command (e.g., `-e GEMINI_API_KEY=...`).
+- `GEMINI_DEFAULT_AUTH_TYPE` will be set based on the discovered auth method.
 
-#### B. Filesystem Mirroring (Optional for ADC)
+#### B. Filesystem Mirroring (ADC and OAuth)
 If `GOOGLE_APPLICATION_CREDENTIALS` is set and points to a file, `gswarm` should:
-1.  Mount the credential JSON file into a standard location in the container (e.g., `/home/gemini/.config/gcp/application_default_credentials.json`).
+1.  Mount the credential JSON file into a standard location in the container (e.g., `/home/node/.config/gcp/application_default_credentials.json`).
 2.  Set the `GOOGLE_APPLICATION_CREDENTIALS` environment variable inside the container to point to this internal path.
+
+If OAuth is detected:
+1.  Mount `~/.gemini/oauth_creds.json` to `/home/node/.gemini/oauth_creds.json` in the container.
+2.  Set `GEMINI_DEFAULT_AUTH_TYPE=oauth-personal` inside the container.
+
 
 ### 3. Agent Configuration Alignment
 

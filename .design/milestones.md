@@ -36,13 +36,14 @@ This document breaks down the implementation of `gswarm` into independent stages
 - [ ] Verify agent has unique identity and persistent history (**Pending**)
 
 ## Milestone 4: Git Worktree Integration
-**Goal**: Enable concurrent agents to work on the same repository safely.
+**Goal**: Enable concurrent agents to work on the same repository safely (when running within a git repo).
 
 - [ ] Implement Worktree Manager (**Pending**)
-    - [ ] Logic to create worktrees in `../.gswarm_worktrees/`.
+    - [ ] Logic to detect if current project is a git repo.
+    - [ ] Logic to create worktrees in `../.gswarm_worktrees/` if in a git repo.
     - [ ] Automatic branch creation for the agent.
 - [ ] Update `gswarm start` (v2) (**Pending**)
-    - [ ] Mount worktree to `/workspace` in the container.
+    - [ ] Conditionally mount worktree to `/workspace` in the container.
     - [ ] Implement macOS-specific path isolation checks.
 - [ ] Verify two agents can run in the same swarm with different file states (**Pending**)
 
@@ -70,6 +71,17 @@ This document breaks down the implementation of `gswarm` into independent stages
 **Goal**: Facilitate easy customization of agent personas.
 
 - [ ] Implement `gswarm templates` subcommands (**Pending**)
+
     - [ ] `list`, `create`, `delete`.
+
 - [ ] Implement Extension management (**Pending**)
+
     - [ ] `extensions install` (modifies `settings.json` in the template).
+
+
+
+## Current Issues & Debugging Tasks
+
+- [ ] **Issue**: [Auth Dialog Appears Despite Valid Credentials](./issues/auth-dialog.md)
+
+- [ ] **Issue**: [Apple Native Container Does Not Support Attach](./issues/apple-container-attach.md)
