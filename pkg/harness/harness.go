@@ -21,5 +21,7 @@ func New(provider string) Harness {
 		return &ClaudeCode{}
 	case "gemini":
 		return &GeminiCLI{}
+	default:
+		return &Generic{}
 	}
 }
