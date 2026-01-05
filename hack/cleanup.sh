@@ -29,3 +29,7 @@ if [ -d "${TEST_DIR}/.scion" ]; then
 fi
 
 echo "=== Cleanup Complete ==="
+
+
+
+"$(dirname "$0")"/setup.sh
