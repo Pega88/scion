@@ -92,9 +92,10 @@ func CreateWorktree(path, branch string) error {
 }
 
 // RemoveWorktree removes a git worktree at the specified path.
-func RemoveWorktree(path string, deleteBranch bool) error {
+func RemoveWorktree(path string, deleteBranch bool) (bool, error) {
 	var branchName string
 	var repoRoot string
+	branchDeleted := false
 
 	if deleteBranch {
 		// Get the common git dir (main repo's .git dir)
@@ -121,15 +122,17 @@ func RemoveWorktree(path string, deleteBranch bool) error {
 	// We run this from the system root or anywhere to ensure we're not "in" the dir
 	cmd := exec.Command("git", "worktree", "remove", path, "--force")
 	if err := cmd.Run(); err != nil {
-		return err
+		return false, err
 	}
 
 	if deleteBranch && branchName != "" && repoRoot != "" {
 		// Now delete the branch from the main repo
 		cmd := exec.Command("git", "-C", repoRoot, "branch", "-D", branchName)
-		return cmd.Run()
+		if err := cmd.Run(); err == nil {
+			branchDeleted = true
+		}
 	}
-	return nil
+	return branchDeleted, nil
 }
 
 // PruneWorktrees prunes worktree information for worktrees that no longer exist.

@@ -101,9 +101,9 @@ func TestGitUtils(t *testing.T) {
 		}
 
 		// Remove
-			if err := RemoveWorktree(worktreePath, false); err != nil {
-				t.Fatalf("RemoveWorktree failed: %v", err)
-			}		
+		if _, err := RemoveWorktree(worktreePath, false); err != nil {
+			t.Fatalf("RemoveWorktree failed: %v", err)
+		}		
 		// Wait/Check? git worktree remove deletes the directory usually.
 		if _, err := os.Stat(worktreePath); !os.IsNotExist(err) {
 			t.Errorf("worktree dir still exists after removal")

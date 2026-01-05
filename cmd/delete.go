@@ -48,8 +48,13 @@ var deleteCmd = &cobra.Command{
 			fmt.Println("No container found, removing agent definition...")
 		}
 
-		if err := mgr.Delete(context.Background(), agentName, true, grovePath, removeBranch); err != nil {
+		branchDeleted, err := mgr.Delete(context.Background(), agentName, true, grovePath, removeBranch)
+		if err != nil {
 			return err
+		}
+
+		if branchDeleted {
+			fmt.Printf("Git branch associated with agent '%s' deleted.\n", agentName)
 		}
 
 		fmt.Printf("Agent '%s' deleted.\n", agentName)
