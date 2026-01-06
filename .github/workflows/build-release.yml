@@ -1,0 +1,104 @@
+name: Build Multi-Arch Release
+
+on:
+  push:
+    tags:
+      - '*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Multi-Arch Binaries
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          # Linux builds
+          - goos: linux
+            goarch: amd64
+            output: scion-linux-amd64
+          - goos: linux
+            goarch: arm64
+            output: scion-linux-arm64
+          # macOS builds
+          - goos: darwin
+            goarch: amd64
+            output: scion-darwin-amd64
+          - goos: darwin
+            goarch: arm64
+            output: scion-darwin-arm64
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Get version info
+        id: version
+        run: |
+          # Get version from git tag
+          if git describe --tags --exact-match >/dev/null 2>&1; then
+            VERSION=$(git describe --tags --exact-match)
+          else
+            VERSION=""
+          fi
+          
+          COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
+          BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          PKG="github.com/ptone/scion-agent/pkg/version"
+          
+          # Build ldflags, only including version if available
+          LDFLAGS="-X ${PKG}.Commit=${COMMIT} -X ${PKG}.BuildTime=${BUILD_TIME}"
+          if [ -n "$VERSION" ]; then
+            LDFLAGS="${LDFLAGS} -X ${PKG}.Version=${VERSION}"
+          fi
+          
+          echo "ldflags=${LDFLAGS}" >> $GITHUB_OUTPUT
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Build binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          mkdir -p dist
+          go build -ldflags "${{ steps.version.outputs.ldflags }}" -o dist/scion ./cmd/scion
+          tar -czvf ${{ matrix.output }}.tar.gz -C dist scion
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.output }}
+          path: ${{ matrix.output }}.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: binaries
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release
+          find binaries -type f -exec mv {} release/ \;
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          draft: false
+          prerelease: false
+          generate_release_notes: true
