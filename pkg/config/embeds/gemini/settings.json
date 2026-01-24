@@ -5,36 +5,117 @@
       "selectedType": "gemini-api-key"
     }
   },
-  "model": {
-    "skipNextSpeakerCheck": true
+  "context": {
+    "fileName": ["CLAUDE.md","AGENTS.md", "GEMINI.md"]
   },
-	"telemetry": {
+  "model": {
+    "skipNextSpeakerCheck": true,
+    "name": "gemini-3-flash-preview"
+  },
+  "telemetry": {
     "enabled": false
   },
-	"general": {
+  "general": {
     "disableAutoUpdate": true,
     "disableUpdateNag": true,
     "previewFeatures": true
   },
-	"ui": {
+  "ui": {
     "accessibility": {
       "disableLoadingPhrases": true
     },
     "hideFooter": true,
     "hideWindowTitle": true
   },
-	"tools": {
-	    "enableHooks": true,
-	    "enableMessageBusIntegration": true
-	},
+  "tools": {
+    "enableHooks": true,
+    "enableMessageBusIntegration": true
+  },
   "hooks": {
-    "enabled":true,
-    "SessionStart": [{"matcher": "*", "hooks": [{"name": "scion-status", "type": "command", "command": "sciontool hook --dialect=gemini"}]}],
-    "SessionEnd": [{"matcher": "*", "hooks": [{"name": "scion-status", "type": "command", "command": "sciontool hook --dialect=gemini"}]}],
-    "BeforeAgent": [{"matcher": "*", "hooks": [{"name": "scion-status", "type": "command", "command": "sciontool hook --dialect=gemini"}]}],
-    "AfterAgent": [{"matcher": "*", "hooks": [{"name": "scion-status", "type": "command", "command": "sciontool hook --dialect=gemini"}]}],
-    "BeforeTool": [{"matcher": "*", "hooks": [{"name": "scion-status", "type": "command", "command": "sciontool hook --dialect=gemini"}]}],
-    "AfterTool": [{"matcher": "*", "hooks": [{"name": "scion-status", "type": "command", "command": "sciontool hook --dialect=gemini"}]}],
-    "Notification": [{"matcher": "ToolPermission", "hooks": [{"name": "scion-status", "type": "command", "command": "sciontool hook --dialect=gemini"}]}]
+    "enabled": true,
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "name": "scion-status",
+            "type": "command",
+            "command": "sciontool hook --dialect=gemini"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "name": "scion-status",
+            "type": "command",
+            "command": "sciontool hook --dialect=gemini"
+          }
+        ]
+      }
+    ],
+    "BeforeAgent": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "name": "scion-status",
+            "type": "command",
+            "command": "sciontool hook --dialect=gemini"
+          }
+        ]
+      }
+    ],
+    "AfterAgent": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "name": "scion-status",
+            "type": "command",
+            "command": "sciontool hook --dialect=gemini"
+          }
+        ]
+      }
+    ],
+    "BeforeTool": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "name": "scion-status",
+            "type": "command",
+            "command": "sciontool hook --dialect=gemini"
+          }
+        ]
+      }
+    ],
+    "AfterTool": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "name": "scion-status",
+            "type": "command",
+            "command": "sciontool hook --dialect=gemini"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "ToolPermission",
+        "hooks": [
+          {
+            "name": "scion-status",
+            "type": "command",
+            "command": "sciontool hook --dialect=gemini"
+          }
+        ]
+      }
+    ]
   }
 }
