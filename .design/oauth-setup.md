@@ -353,6 +353,127 @@ echo -n "your-google-client-secret" | gcloud secrets create google-client-secret
 
 ---
 
+## Part 6: Authentication Mode Toggle
+
+The web frontend supports two authentication modes:
+
+| Mode | Use Case | How It Works |
+|------|----------|--------------|
+| **Dev Auth** | Local development | Auto-login using a shared dev token from `~/.scion/dev-token` |
+| **OAuth** | Production / Staging | Users authenticate via Google or GitHub |
+
+### Controlling Authentication Mode
+
+The authentication mode is controlled by the `SCION_DEV_AUTH_ENABLED` environment variable:
+
+```bash
+# Explicitly enable dev-auth (useful for staging/testing)
+SCION_DEV_AUTH_ENABLED=true
+
+# Explicitly disable dev-auth (forces OAuth even in development)
+SCION_DEV_AUTH_ENABLED=false
+```
+
+**Default behavior:**
+- `NODE_ENV=development` (or unset): Dev-auth **enabled** by default
+- `NODE_ENV=production`: Dev-auth **disabled** by default (OAuth required)
+
+### How It Works
+
+1. On server startup, the web frontend checks for dev-auth eligibility
+2. If dev-auth is enabled AND a valid token exists in `~/.scion/dev-token`:
+   - Users are automatically logged in as "Development User"
+   - No OAuth flow is triggered
+   - The dev token is forwarded to the Hub API for authorization
+3. If dev-auth is disabled OR no token exists:
+   - Users must authenticate via OAuth (Google or GitHub)
+   - Session-based authentication is used
+
+### Token Resolution Order
+
+The dev token is resolved in this order:
+1. `SCION_DEV_TOKEN` environment variable
+2. File at `SCION_DEV_TOKEN_FILE` path (if set)
+3. Default file: `~/.scion/dev-token`
+
+---
+
+## Appendix A: Sample Configuration Files
+
+### ~/.scion/settings.yaml
+
+This file configures the Scion CLI and can include web frontend settings:
+
+```yaml
+# ~/.scion/settings.yaml
+# Scion configuration file
+
+# Hub API configuration
+hub:
+  # URL where the Hub API is running
+  url: http://localhost:9810
+
+# Web Frontend configuration
+web:
+  # Port for the web server
+  port: 8080
+
+  # Base URL for OAuth callbacks (must match OAuth app configuration)
+  base_url: http://localhost:8080
+
+  # Authentication settings
+  auth:
+    # Google OAuth credentials
+    google:
+      client_id: "123456789-abcdefghijklmnop.apps.googleusercontent.com"
+      client_secret: "GOCSPX-xxxxxxxxxxxxxxxxxxxxxxxx"
+
+    # GitHub OAuth credentials
+    github:
+      client_id: "Iv1.abcdef1234567890"
+      client_secret: "0123456789abcdef0123456789abcdef01234567"
+
+    # Authorized email domains (empty = allow all)
+    authorized_domains:
+      - example.com
+      - mycompany.org
+
+  # Session configuration
+  session:
+    # Secret for signing session cookies (generate with: openssl rand -base64 32)
+    secret: "K7gNU3sdo+OL0wNhqoVWhr3g6s1xYv72ol/pe/Unols="
+    # Session max age in hours
+    max_age_hours: 24
+
+# Development settings
+dev:
+  # Enable dev-auth mode (overrides NODE_ENV default)
+  auth_enabled: true
+  # Explicit dev token (optional, normally read from ~/.scion/dev-token)
+  # token: "scion_dev_abc123..."
+```
+
+> **Note**: The web frontend currently reads configuration from environment variables. This settings.yaml format is for documentation and future CLI integration. Convert to environment variables for current use.
+
+### Environment Variable Mapping
+
+| settings.yaml Path | Environment Variable |
+|--------------------|---------------------|
+| `web.port` | `PORT` |
+| `web.base_url` | `BASE_URL` |
+| `web.auth.google.client_id` | `GOOGLE_CLIENT_ID` |
+| `web.auth.google.client_secret` | `GOOGLE_CLIENT_SECRET` |
+| `web.auth.github.client_id` | `GITHUB_CLIENT_ID` |
+| `web.auth.github.client_secret` | `GITHUB_CLIENT_SECRET` |
+| `web.auth.authorized_domains` | `AUTHORIZED_DOMAINS` (comma-separated) |
+| `web.session.secret` | `SESSION_SECRET` |
+| `web.session.max_age_hours` | `SESSION_MAX_AGE` (in milliseconds) |
+| `dev.auth_enabled` | `SCION_DEV_AUTH_ENABLED` |
+| `dev.token` | `SCION_DEV_TOKEN` |
+| `hub.url` | `HUB_API_URL` |
+
+---
+
 ## References
 
 - [Google OAuth 2.0 Documentation](https://developers.google.com/identity/protocols/oauth2)
