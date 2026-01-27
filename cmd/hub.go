@@ -337,13 +337,15 @@ func runHubRegister(cmd *cobra.Command, args []string) error {
 	if isGlobal {
 		groveName = "global"
 	} else {
-		// Get git remote
+		// Get git remote (optional - not required for registration)
 		gitRemote = util.GetGitRemote()
-		if gitRemote == "" {
-			return fmt.Errorf("could not determine git remote for this project")
+		if gitRemote != "" {
+			// Get project name from git remote
+			groveName = util.ExtractRepoName(gitRemote)
+		} else {
+			// No origin remote - use directory name as grove name
+			groveName = filepath.Base(filepath.Dir(resolvedPath))
 		}
-		// Get project name from git remote
-		groveName = util.ExtractRepoName(gitRemote)
 	}
 
 	// Get hostname (always use system hostname to prevent duplicates)

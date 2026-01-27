@@ -93,7 +93,7 @@ func wrapHubError(err error) error {
 func GetGroveIDFromGitRemote(hubCtx *HubContext) (string, error) {
 	gitRemote := util.GetGitRemote()
 	if gitRemote == "" {
-		return "", fmt.Errorf("could not determine git remote for this project.\n\nRun 'scion hub register' to register this grove with the Hub, or use --no-hub for local-only mode")
+		return "", fmt.Errorf("no git origin remote found for this project.\n\nThe Hub uses the origin remote URL to identify groves.\nRun 'scion hub register' to register this grove with the Hub, or use --no-hub for local-only mode")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
