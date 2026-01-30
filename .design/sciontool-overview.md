@@ -373,3 +373,77 @@ docker logs test-container | grep -i shutdown
 - **Metrics exposition:** Prometheus-format metrics at `/metrics`
 - **Hot reload:** Reload configuration without restart
 - **Plugin system:** Dynamic hook loading for custom integrations
+
+---
+
+## Appendix A: Shutdown Hook Performance Analysis
+
+*Added: 2026-01-30*
+
+### Observed Behavior
+
+Container shutdown logs show delays around these messages:
+```
+[sciontool] Running pre-stop hooks...
+[sciontool] Running session-end hooks...
+```
+
+### What the Hooks Actually Do
+
+**Pre-stop hooks** (`pkg/sciontool/hooks/lifecycle.go:62-70`):
+1. Looks for executable scripts in `/etc/scion/hooks/pre-stop{,.sh,.d/*}` (none installed by default)
+2. Calls `StatusHandler.Handle()` — writes "shutting_down" to `~/agent-info.json`
+3. Calls `LoggingHandler.Handle()` — appends to `~/agent.log`
+
+**Session-end hooks** (`lifecycle.go:72-79`):
+- Same pattern: script hooks + status update + log append
+
+All registered handlers perform simple local file operations (no network calls).
+
+### Shutdown Sequence
+
+```
+SIGTERM/SIGINT received
+    │
+    ▼
+[sciontool] Running pre-stop hooks...
+    │  └─ StatusHandler: write agent-info.json
+    │  └─ LoggingHandler: append agent.log
+    ▼
+context.Cancel() called
+    │
+    ▼
+Supervisor sends SIGTERM to child process
+    │
+    ▼
+Child (Claude Code/Gemini) receives SIGTERM
+    │  └─ Harness fires SessionEnd/Stop hooks
+    │  └─ Each hook spawns: sciontool hook --dialect=claude
+    │
+    ▼
+Child process exits
+    │
+    ▼
+[sciontool] Running session-end hooks...
+    │  └─ StatusHandler: write agent-info.json
+    │  └─ LoggingHandler: append agent.log
+    ▼
+sciontool exits with child's exit code
+```
+
+### Likely Sources of Delay
+
+1. **Child process shutdown time** — The gap between pre-stop and session-end includes waiting for the child process (Claude Code/Gemini) to exit. The harness may be doing its own cleanup.
+
+2. **Harness hook spawning** — When the child receives SIGTERM, Claude Code fires `SessionEnd` and `Stop` hooks (configured in `pkg/config/embeds/claude/settings.json:21-24`), each spawning a new `sciontool hook` process.
+
+3. **Process spawn overhead** — Each `sciontool hook` invocation starts a new Go process. Multiple hooks during shutdown compound this latency.
+
+4. **Filesystem latency** — On network storage or slow overlay filesystems, the atomic file writes could be slower than expected.
+
+### Potential Optimizations
+
+- **Add timing instrumentation** to identify the exact bottleneck
+- **Batch harness hooks** to reduce process spawning during shutdown
+- **Async file writes** for non-critical status updates
+- **Reduce harness hooks on shutdown** — consider removing `Stop`/`SubagentStop` hooks if `SessionEnd` is sufficient
