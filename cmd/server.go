@@ -295,6 +295,7 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 			DevAuthToken:       devAuthToken,
 			Debug:              enableDebug,
 			OAuthConfig: hub.OAuthConfig{
+				// Legacy single config (for backward compatibility)
 				Google: hub.OAuthProviderConfig{
 					ClientID:     cfg.OAuth.Google.ClientID,
 					ClientSecret: cfg.OAuth.Google.ClientSecret,
@@ -302,6 +303,28 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 				GitHub: hub.OAuthProviderConfig{
 					ClientID:     cfg.OAuth.GitHub.ClientID,
 					ClientSecret: cfg.OAuth.GitHub.ClientSecret,
+				},
+				// Web-specific OAuth client
+				Web: hub.OAuthClientConfig{
+					Google: hub.OAuthProviderConfig{
+						ClientID:     cfg.OAuth.Web.Google.ClientID,
+						ClientSecret: cfg.OAuth.Web.Google.ClientSecret,
+					},
+					GitHub: hub.OAuthProviderConfig{
+						ClientID:     cfg.OAuth.Web.GitHub.ClientID,
+						ClientSecret: cfg.OAuth.Web.GitHub.ClientSecret,
+					},
+				},
+				// CLI-specific OAuth client
+				CLI: hub.OAuthClientConfig{
+					Google: hub.OAuthProviderConfig{
+						ClientID:     cfg.OAuth.CLI.Google.ClientID,
+						ClientSecret: cfg.OAuth.CLI.Google.ClientSecret,
+					},
+					GitHub: hub.OAuthProviderConfig{
+						ClientID:     cfg.OAuth.CLI.GitHub.ClientID,
+						ClientSecret: cfg.OAuth.CLI.GitHub.ClientSecret,
+					},
 				},
 			},
 		}

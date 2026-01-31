@@ -17,19 +17,19 @@ type OAuthProviderConfig struct {
 	ClientSecret string
 }
 
-// OAuthConfig holds configuration for all OAuth providers.
-type OAuthConfig struct {
+// OAuthClientConfig holds OAuth provider configurations for a specific client type.
+type OAuthClientConfig struct {
 	Google OAuthProviderConfig
 	GitHub OAuthProviderConfig
 }
 
 // IsConfigured returns true if at least one OAuth provider is configured.
-func (c *OAuthConfig) IsConfigured() bool {
+func (c *OAuthClientConfig) IsConfigured() bool {
 	return c.Google.ClientID != "" || c.GitHub.ClientID != ""
 }
 
 // IsProviderConfigured returns true if the specified provider is configured.
-func (c *OAuthConfig) IsProviderConfigured(provider string) bool {
+func (c *OAuthClientConfig) IsProviderConfigured(provider string) bool {
 	switch provider {
 	case "google":
 		return c.Google.ClientID != "" && c.Google.ClientSecret != ""
@@ -40,7 +40,88 @@ func (c *OAuthConfig) IsProviderConfigured(provider string) bool {
 	}
 }
 
-// OAuthService handles OAuth operations for CLI authentication.
+// GetProvider returns the provider config for the specified provider.
+func (c *OAuthClientConfig) GetProvider(provider string) OAuthProviderConfig {
+	switch provider {
+	case "google":
+		return c.Google
+	case "github":
+		return c.GitHub
+	default:
+		return OAuthProviderConfig{}
+	}
+}
+
+// OAuthConfig holds configuration for all OAuth providers.
+// Supports both legacy single-config format and new per-client-type format.
+type OAuthConfig struct {
+	// Legacy: single config used for both web and CLI
+	Google OAuthProviderConfig
+	GitHub OAuthProviderConfig
+
+	// Client-type specific configs
+	Web OAuthClientConfig
+	CLI OAuthClientConfig
+}
+
+// IsConfigured returns true if at least one OAuth provider is configured.
+func (c *OAuthConfig) IsConfigured() bool {
+	return c.Google.ClientID != "" || c.GitHub.ClientID != "" ||
+		c.Web.IsConfigured() || c.CLI.IsConfigured()
+}
+
+// IsProviderConfigured returns true if the specified provider is configured
+// for at least one client type.
+func (c *OAuthConfig) IsProviderConfigured(provider string) bool {
+	switch provider {
+	case "google":
+		return (c.Google.ClientID != "" && c.Google.ClientSecret != "") ||
+			(c.Web.Google.ClientID != "" && c.Web.Google.ClientSecret != "") ||
+			(c.CLI.Google.ClientID != "" && c.CLI.Google.ClientSecret != "")
+	case "github":
+		return (c.GitHub.ClientID != "" && c.GitHub.ClientSecret != "") ||
+			(c.Web.GitHub.ClientID != "" && c.Web.GitHub.ClientSecret != "") ||
+			(c.CLI.GitHub.ClientID != "" && c.CLI.GitHub.ClientSecret != "")
+	default:
+		return false
+	}
+}
+
+// GetWebConfig returns the OAuth config for web clients.
+// Falls back to legacy config if web-specific config is not set.
+func (c *OAuthConfig) GetWebConfig() OAuthClientConfig {
+	if c.Web.IsConfigured() {
+		return c.Web
+	}
+	return OAuthClientConfig{
+		Google: c.Google,
+		GitHub: c.GitHub,
+	}
+}
+
+// GetCLIConfig returns the OAuth config for CLI clients.
+// Falls back to legacy config if CLI-specific config is not set.
+func (c *OAuthConfig) GetCLIConfig() OAuthClientConfig {
+	if c.CLI.IsConfigured() {
+		return c.CLI
+	}
+	return OAuthClientConfig{
+		Google: c.Google,
+		GitHub: c.GitHub,
+	}
+}
+
+// ClientType represents the type of client (web or CLI).
+type OAuthClientType string
+
+const (
+	// OAuthClientTypeWeb is for web browser-based OAuth flows.
+	OAuthClientTypeWeb OAuthClientType = "web"
+	// OAuthClientTypeCLI is for CLI localhost callback OAuth flows.
+	OAuthClientTypeCLI OAuthClientType = "cli"
+)
+
+// OAuthService handles OAuth operations for authentication.
 type OAuthService struct {
 	config     OAuthConfig
 	httpClient *http.Client
@@ -54,6 +135,26 @@ func NewOAuthService(config OAuthConfig) *OAuthService {
 			Timeout: 30 * time.Second,
 		},
 	}
+}
+
+// getClientConfig returns the appropriate OAuth client config for the given client type.
+func (s *OAuthService) getClientConfig(clientType OAuthClientType) OAuthClientConfig {
+	switch clientType {
+	case OAuthClientTypeWeb:
+		return s.config.GetWebConfig()
+	case OAuthClientTypeCLI:
+		return s.config.GetCLIConfig()
+	default:
+		// Default to CLI for backward compatibility
+		return s.config.GetCLIConfig()
+	}
+}
+
+// IsProviderConfiguredForClient returns true if the specified provider is configured
+// for the given client type.
+func (s *OAuthService) IsProviderConfiguredForClient(clientType OAuthClientType, provider string) bool {
+	cfg := s.getClientConfig(clientType)
+	return cfg.IsProviderConfigured(provider)
 }
 
 // OAuthUserInfo contains user information retrieved from an OAuth provider.
@@ -81,25 +182,39 @@ const (
 )
 
 // GetAuthorizationURL generates an OAuth authorization URL for the specified provider.
+// Uses the default (CLI) client configuration for backward compatibility.
 func (s *OAuthService) GetAuthorizationURL(provider, callbackURL, state string) (string, error) {
+	return s.GetAuthorizationURLForClient(OAuthClientTypeCLI, provider, callbackURL, state)
+}
+
+// GetAuthorizationURLForClient generates an OAuth authorization URL for the specified
+// provider and client type.
+func (s *OAuthService) GetAuthorizationURLForClient(clientType OAuthClientType, provider, callbackURL, state string) (string, error) {
+	cfg := s.getClientConfig(clientType)
+
 	switch provider {
 	case "google":
-		return s.getGoogleAuthURL(callbackURL, state)
+		return s.getGoogleAuthURLWithConfig(cfg.Google, callbackURL, state)
 	case "github":
-		return s.getGitHubAuthURL(callbackURL, state)
+		return s.getGitHubAuthURLWithConfig(cfg.GitHub, callbackURL, state)
 	default:
 		return "", fmt.Errorf("unsupported OAuth provider: %s", provider)
 	}
 }
 
-// getGoogleAuthURL generates a Google OAuth authorization URL.
+// getGoogleAuthURL generates a Google OAuth authorization URL using the default config.
 func (s *OAuthService) getGoogleAuthURL(callbackURL, state string) (string, error) {
-	if s.config.Google.ClientID == "" {
+	return s.getGoogleAuthURLWithConfig(s.config.GetCLIConfig().Google, callbackURL, state)
+}
+
+// getGoogleAuthURLWithConfig generates a Google OAuth authorization URL with the given config.
+func (s *OAuthService) getGoogleAuthURLWithConfig(cfg OAuthProviderConfig, callbackURL, state string) (string, error) {
+	if cfg.ClientID == "" {
 		return "", fmt.Errorf("Google OAuth is not configured")
 	}
 
 	params := url.Values{
-		"client_id":     {s.config.Google.ClientID},
+		"client_id":     {cfg.ClientID},
 		"redirect_uri":  {callbackURL},
 		"response_type": {"code"},
 		"scope":         {"openid email profile"},
@@ -111,14 +226,19 @@ func (s *OAuthService) getGoogleAuthURL(callbackURL, state string) (string, erro
 	return googleAuthURL + "?" + params.Encode(), nil
 }
 
-// getGitHubAuthURL generates a GitHub OAuth authorization URL.
+// getGitHubAuthURL generates a GitHub OAuth authorization URL using the default config.
 func (s *OAuthService) getGitHubAuthURL(callbackURL, state string) (string, error) {
-	if s.config.GitHub.ClientID == "" {
+	return s.getGitHubAuthURLWithConfig(s.config.GetCLIConfig().GitHub, callbackURL, state)
+}
+
+// getGitHubAuthURLWithConfig generates a GitHub OAuth authorization URL with the given config.
+func (s *OAuthService) getGitHubAuthURLWithConfig(cfg OAuthProviderConfig, callbackURL, state string) (string, error) {
+	if cfg.ClientID == "" {
 		return "", fmt.Errorf("GitHub OAuth is not configured")
 	}
 
 	params := url.Values{
-		"client_id":    {s.config.GitHub.ClientID},
+		"client_id":    {cfg.ClientID},
 		"redirect_uri": {callbackURL},
 		"scope":        {"read:user user:email"},
 		"state":        {state},
@@ -128,12 +248,21 @@ func (s *OAuthService) getGitHubAuthURL(callbackURL, state string) (string, erro
 }
 
 // ExchangeCode exchanges an authorization code for user information.
+// Uses the default (CLI) client configuration for backward compatibility.
 func (s *OAuthService) ExchangeCode(ctx context.Context, provider, code, callbackURL string) (*OAuthUserInfo, error) {
+	return s.ExchangeCodeForClient(ctx, OAuthClientTypeCLI, provider, code, callbackURL)
+}
+
+// ExchangeCodeForClient exchanges an authorization code for user information
+// using the specified client type's configuration.
+func (s *OAuthService) ExchangeCodeForClient(ctx context.Context, clientType OAuthClientType, provider, code, callbackURL string) (*OAuthUserInfo, error) {
+	cfg := s.getClientConfig(clientType)
+
 	switch provider {
 	case "google":
-		return s.exchangeGoogleCode(ctx, code, callbackURL)
+		return s.exchangeGoogleCodeWithConfig(ctx, cfg.Google, code, callbackURL)
 	case "github":
-		return s.exchangeGitHubCode(ctx, code, callbackURL)
+		return s.exchangeGitHubCodeWithConfig(ctx, cfg.GitHub, code, callbackURL)
 	default:
 		return nil, fmt.Errorf("unsupported OAuth provider: %s", provider)
 	}
@@ -141,12 +270,17 @@ func (s *OAuthService) ExchangeCode(ctx context.Context, provider, code, callbac
 
 // exchangeGoogleCode exchanges a Google authorization code for user info.
 func (s *OAuthService) exchangeGoogleCode(ctx context.Context, code, callbackURL string) (*OAuthUserInfo, error) {
-	if s.config.Google.ClientID == "" || s.config.Google.ClientSecret == "" {
+	return s.exchangeGoogleCodeWithConfig(ctx, s.config.GetCLIConfig().Google, code, callbackURL)
+}
+
+// exchangeGoogleCodeWithConfig exchanges a Google authorization code for user info using the given config.
+func (s *OAuthService) exchangeGoogleCodeWithConfig(ctx context.Context, cfg OAuthProviderConfig, code, callbackURL string) (*OAuthUserInfo, error) {
+	if cfg.ClientID == "" || cfg.ClientSecret == "" {
 		return nil, fmt.Errorf("Google OAuth is not configured")
 	}
 
 	// Exchange code for access token
-	tokenResp, err := s.exchangeCodeForToken(ctx, googleTokenURL, s.config.Google.ClientID, s.config.Google.ClientSecret, code, callbackURL)
+	tokenResp, err := s.exchangeCodeForToken(ctx, googleTokenURL, cfg.ClientID, cfg.ClientSecret, code, callbackURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to exchange Google code: %w", err)
 	}
@@ -162,12 +296,17 @@ func (s *OAuthService) exchangeGoogleCode(ctx context.Context, code, callbackURL
 
 // exchangeGitHubCode exchanges a GitHub authorization code for user info.
 func (s *OAuthService) exchangeGitHubCode(ctx context.Context, code, callbackURL string) (*OAuthUserInfo, error) {
-	if s.config.GitHub.ClientID == "" || s.config.GitHub.ClientSecret == "" {
+	return s.exchangeGitHubCodeWithConfig(ctx, s.config.GetCLIConfig().GitHub, code, callbackURL)
+}
+
+// exchangeGitHubCodeWithConfig exchanges a GitHub authorization code for user info using the given config.
+func (s *OAuthService) exchangeGitHubCodeWithConfig(ctx context.Context, cfg OAuthProviderConfig, code, callbackURL string) (*OAuthUserInfo, error) {
+	if cfg.ClientID == "" || cfg.ClientSecret == "" {
 		return nil, fmt.Errorf("GitHub OAuth is not configured")
 	}
 
 	// Exchange code for access token
-	tokenResp, err := s.exchangeGitHubCodeForToken(ctx, code, callbackURL)
+	tokenResp, err := s.exchangeGitHubCodeForTokenWithConfig(ctx, cfg, code, callbackURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to exchange GitHub code: %w", err)
 	}
@@ -227,9 +366,14 @@ func (s *OAuthService) exchangeCodeForToken(ctx context.Context, tokenURL, clien
 
 // exchangeGitHubCodeForToken exchanges a GitHub authorization code for an access token.
 func (s *OAuthService) exchangeGitHubCodeForToken(ctx context.Context, code, callbackURL string) (*tokenResponse, error) {
+	return s.exchangeGitHubCodeForTokenWithConfig(ctx, s.config.GetCLIConfig().GitHub, code, callbackURL)
+}
+
+// exchangeGitHubCodeForTokenWithConfig exchanges a GitHub authorization code for an access token using the given config.
+func (s *OAuthService) exchangeGitHubCodeForTokenWithConfig(ctx context.Context, cfg OAuthProviderConfig, code, callbackURL string) (*tokenResponse, error) {
 	data := url.Values{
-		"client_id":     {s.config.GitHub.ClientID},
-		"client_secret": {s.config.GitHub.ClientSecret},
+		"client_id":     {cfg.ClientID},
+		"client_secret": {cfg.ClientSecret},
 		"code":          {code},
 		"redirect_uri":  {callbackURL},
 	}

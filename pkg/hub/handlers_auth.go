@@ -541,15 +541,15 @@ func (s *Server) handleCLIAuthAuthorize(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Check if the requested provider is configured
-	if !s.oauthService.config.IsProviderConfigured(provider) {
+	// Check if the requested provider is configured for CLI
+	if !s.oauthService.IsProviderConfiguredForClient(OAuthClientTypeCLI, provider) {
 		writeError(w, http.StatusBadRequest, ErrCodeValidationError,
-			"OAuth provider not configured: "+provider, nil)
+			"OAuth provider not configured for CLI: "+provider, nil)
 		return
 	}
 
-	// Generate authorization URL
-	authURL, err := s.oauthService.GetAuthorizationURL(provider, req.CallbackURL, req.State)
+	// Generate authorization URL using CLI OAuth client
+	authURL, err := s.oauthService.GetAuthorizationURLForClient(OAuthClientTypeCLI, provider, req.CallbackURL, req.State)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "oauth_error",
 			"failed to generate authorization URL: "+err.Error(), nil)
@@ -596,9 +596,9 @@ func (s *Server) handleCLIAuthToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Exchange code for user info
+	// Exchange code for user info using CLI OAuth client
 	ctx := r.Context()
-	userInfo, err := s.oauthService.ExchangeCode(ctx, provider, req.Code, req.CallbackURL)
+	userInfo, err := s.oauthService.ExchangeCodeForClient(ctx, OAuthClientTypeCLI, provider, req.Code, req.CallbackURL)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "oauth_error",
 			"failed to exchange authorization code: "+err.Error(), nil)
