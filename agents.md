@@ -3,6 +3,13 @@
 ## Overview
 `scion` is a container-based orchestration platform designed to manage concurrent LLM-based code agents. It supports both a standalone local CLI mode and a distributed "Hosted" architecture where state is centralized in a Hub and agents execute on disparate Runtime Hosts (local Docker, remote servers, or Kubernetes clusters).
 
+## System Goals
+- **Parallelism**: Run multiple agents concurrently as independent processes.
+- **Isolation**: Ensure strict separation of identities, credentials, and configuration.
+- **Context Management**: Provide each agent with a dedicated git worktree to prevent conflicts.
+- **Specialization**: Support role-based agent configuration via templates.
+- **Interactivity**: Support "detached" background operation with the ability to "attach" for human-in-the-loop interaction.
+
 ## Core Technologies
 - **Backend Language**: Go (Golang)
 - **CLI Framework**: [Cobra](https://github.com/spf13/cobra)
@@ -16,6 +23,28 @@
   - **Claude**: Logic for interacting with Claude Code.
   - **Generic**: A base harness for other LLM interfaces.
 - **Workspace Management**: Git Worktrees for concurrent, isolated code modification.
+
+## Key Concepts
+
+### Solo/Local Architecture
+- **Grove (Group)**: A grouping construct for a set of agents, represented by a `.scion` directory.
+  - **Resolution**: Active grove is resolved by: 1. `--grove` flag, 2. Project-level `.scion`, 3. Global `.scion` in home directory.
+  - **Naming**: Slugified version of the parent directory containing the `.scion` directory.
+- **Agent**: An isolated container running an LLM harness (Gemini, Claude, etc.).
+  - **Filesystem**: Dedicated home directory (`/home/gemini`) containing unique config and history.
+  - **Workspace**: Mounted git worktree at `/workspace`.
+- **Workspace Strategy (Git Worktrees)**:
+  - On start, a new worktree is created at `../.scion_worktrees/<grove>/<agent>` to avoid recursion.
+  - A new feature branch is created for each agent.
+- **Observability & Interactivity**:
+  - **Status**: Agents write state to `/home/gemini/.gemini-status.json` (STARTING, THINKING, EXECUTING, WAITING_FOR_INPUT, COMPLETED, ERROR).
+  - **Intervention**: When `WAITING_FOR_INPUT`, users can `scion attach <agent>` to provide input or confirmations.
+
+### Hosted Architecture
+- **Scion Hub (State Server):** Centralized API and database for agent state, groves, templates, and users.
+- **Grove (Project):** The primary unit of registration. Represents a project/repository (identified by Git remote).
+- **Runtime Host:** A compute node that executes agents. Hosts register the Groves they serve.
+- **Templates:** Configuration blueprints for agents. Managed via the Hub, supporting versioning and storage (GCS/Local).
 
 ## Project Structure
 - `cmd/`: CLI command definitions (using Cobra). Each file corresponds to a `scion` subcommand.
@@ -33,13 +62,6 @@
   - `src/client`: React-based SPA.
   - `src/server`: Node.js/Koa backend-for-frontend (BFF) and SSR.
 - `.design/`: Design specifications and architectural documents. **Review `hosted/` for the latest architecture.**
-
-## Key Concepts (Hosted Architecture)
-
-- **Scion Hub (State Server):** Centralized API and database for agent state, groves, templates, and users.
-- **Grove (Project):** The primary unit of registration. Represents a project/repository (identified by Git remote).
-- **Runtime Host:** A compute node that executes agents. Hosts register the Groves they serve.
-- **Templates:** Configuration blueprints for agents. Managed via the Hub (Phase 2 implementation complete), supporting versioning and storage (GCS/Local).
 
 ## Development Guidelines
 - **Idiomatic Go**: Follow standard Go patterns and naming conventions.
