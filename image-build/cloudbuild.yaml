@@ -182,4 +182,4 @@ substitutions:
 options:
   dynamicSubstitutions: true
   machineType: 'E2_HIGHCPU_8'
-timeout: 7200s # 2 hours for full rebuild
+timeout: 14400s # 4 hours for full rebuild

@@ -66,4 +66,4 @@ substitutions:
 options:
   dynamicSubstitutions: true
   machineType: 'E2_HIGHCPU_8'
-timeout: 7200s
+timeout: 10800s # 3 hours for core-base build
