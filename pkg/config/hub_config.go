@@ -20,6 +20,11 @@ type HubServerConfig struct {
 	ReadTimeout  time.Duration `json:"readTimeout" yaml:"readTimeout" koanf:"readTimeout"`
 	WriteTimeout time.Duration `json:"writeTimeout" yaml:"writeTimeout" koanf:"writeTimeout"`
 
+	// Endpoint is the public-facing URL for this Hub (e.g., "https://hub.example.com").
+	// This is passed to agents so they know where to report status updates.
+	// If empty, agents won't be able to call back to the Hub.
+	Endpoint string `json:"endpoint" yaml:"endpoint" koanf:"endpoint"`
+
 	// CORS settings
 	CORSEnabled        bool     `json:"corsEnabled" yaml:"corsEnabled" koanf:"corsEnabled"`
 	CORSAllowedOrigins []string `json:"corsAllowedOrigins" yaml:"corsAllowedOrigins" koanf:"corsAllowedOrigins"`

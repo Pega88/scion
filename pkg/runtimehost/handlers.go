@@ -177,6 +177,17 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Debug log incoming request
+	if s.config.Debug {
+		log.Printf("[RuntimeHost] Creating agent: name=%s, agentID=%s, groveID=%s", req.Name, req.AgentID, req.GroveID)
+		log.Printf("[RuntimeHost] Hub credentials: hubEndpoint=%q, agentToken=%v, agentID=%q",
+			req.HubEndpoint, req.AgentToken != "", req.AgentID)
+		if req.Config != nil {
+			log.Printf("[RuntimeHost] Config: template=%s, image=%s, templateID=%s",
+				req.Config.Template, req.Config.Image, req.Config.TemplateID)
+		}
+	}
+
 	// Build merged environment:
 	// 1. Start with resolvedEnv (from Hub, contains user/grove/host vars and secrets)
 	// 2. Override with config.Env (explicitly set in request)
@@ -204,12 +215,38 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 	// These enable the agent (via sciontool) to authenticate with the Hub
 	if req.AgentToken != "" {
 		env["SCION_HUB_TOKEN"] = req.AgentToken
+		if s.config.Debug {
+			log.Printf("[RuntimeHost] Set SCION_HUB_TOKEN (length=%d)", len(req.AgentToken))
+		}
 	}
 	if req.HubEndpoint != "" {
 		env["SCION_HUB_URL"] = req.HubEndpoint
+		if s.config.Debug {
+			log.Printf("[RuntimeHost] Set SCION_HUB_URL=%s", req.HubEndpoint)
+		}
 	}
 	if req.AgentID != "" {
 		env["SCION_AGENT_ID"] = req.AgentID
+		if s.config.Debug {
+			log.Printf("[RuntimeHost] Set SCION_AGENT_ID=%s", req.AgentID)
+		}
+	}
+
+	// Pass debug mode to the container so sciontool logs debug info
+	if s.config.Debug {
+		env["SCION_DEBUG"] = "1"
+	}
+
+	// Debug log final env count
+	if s.config.Debug {
+		log.Printf("[RuntimeHost] Final environment has %d variables", len(env))
+		for k := range env {
+			if k == "SCION_HUB_TOKEN" {
+				log.Printf("[RuntimeHost]   %s=<redacted>", k)
+			} else {
+				log.Printf("[RuntimeHost]   %s=%s", k, env[k])
+			}
+		}
 	}
 
 	opts := api.StartOptions{

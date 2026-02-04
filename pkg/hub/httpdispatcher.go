@@ -317,6 +317,11 @@ func (d *HTTPAgentDispatcher) DispatchAgentCreate(ctx context.Context, agent *st
 		HubEndpoint: d.hubEndpoint,
 	}
 
+	if d.debug {
+		log.Printf("[HTTPDispatcher] DispatchAgentCreate: agent=%s, hubEndpoint=%q, tokenGenerator=%v",
+			agent.Name, d.hubEndpoint, d.tokenGenerator != nil)
+	}
+
 	// Generate agent token if token generator is available
 	if d.tokenGenerator != nil {
 		token, err := d.tokenGenerator.GenerateAgentToken(agent.ID, agent.GroveID)
@@ -327,7 +332,12 @@ func (d *HTTPAgentDispatcher) DispatchAgentCreate(ctx context.Context, agent *st
 			// Continue without token - agent will operate in unauthenticated mode
 		} else {
 			req.AgentToken = token
+			if d.debug {
+				log.Printf("[HTTPDispatcher] Generated agent token (length=%d)", len(token))
+			}
 		}
+	} else if d.debug {
+		log.Printf("[HTTPDispatcher] No token generator configured - agent will not have Hub credentials")
 	}
 
 	// Add configuration if available

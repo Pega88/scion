@@ -297,6 +297,7 @@ func runServerStart(cmd *cobra.Command, args []string) error {
 			DevAuthToken:       devAuthToken,
 			Debug:              enableDebug,
 			AuthorizedDomains:  cfg.Auth.AuthorizedDomains,
+			HubEndpoint:        cfg.Hub.Endpoint,
 			OAuthConfig: hub.OAuthConfig{
 				Web: hub.OAuthClientConfig{
 					Google: hub.OAuthProviderConfig{
