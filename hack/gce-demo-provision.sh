@@ -95,6 +95,9 @@ if ! gcloud iam service-accounts describe "${SERVICE_ACCOUNT_EMAIL}" &>/dev/null
         --role "roles/storage.objectAdmin" > /dev/null
     gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
         --member "serviceAccount:${SERVICE_ACCOUNT_EMAIL}" \
+        --role "roles/iam.serviceAccountTokenCreator" > /dev/null
+    gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+        --member "serviceAccount:${SERVICE_ACCOUNT_EMAIL}" \
         --role "roles/dns.admin" > /dev/null
 else
     echo "Service account ${SERVICE_ACCOUNT_NAME} already exists."
