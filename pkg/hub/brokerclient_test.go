@@ -28,30 +28,30 @@ func TestAuthenticatedHostClient_CreateAgent(t *testing.T) {
 	}
 
 	// Create a test host
-	hostID := "test-host-123"
+	brokerID := "test-host-123"
 	secretKey := []byte("test-secret-key-32-bytes-long!!!")
 
-	host := &store.RuntimeHost{
-		ID:      hostID,
+	broker := &store.RuntimeBroker{
+		ID:      brokerID,
 		Name:    "test-host",
 		Slug:    "test-host",
-		Mode:    store.HostModeConnected,
-		Status:  store.HostStatusOnline,
+		Mode:    store.BrokerModeConnected,
+		Status:  store.BrokerStatusOnline,
 		Created: time.Now(),
 		Updated: time.Now(),
 	}
-	if err := db.CreateRuntimeHost(context.Background(), host); err != nil {
+	if err := db.CreateRuntimeBroker(context.Background(), broker); err != nil {
 		t.Fatalf("failed to create runtime host: %v", err)
 	}
 
-	secret := &store.HostSecret{
-		HostID:    hostID,
+	secret := &store.BrokerSecret{
+		BrokerID:    brokerID,
 		SecretKey: secretKey,
-		Algorithm: store.HostSecretAlgorithmHMACSHA256,
-		Status:    store.HostSecretStatusActive,
+		Algorithm: store.BrokerSecretAlgorithmHMACSHA256,
+		Status:    store.BrokerSecretStatusActive,
 		CreatedAt: time.Now(),
 	}
-	if err := db.CreateHostSecret(context.Background(), secret); err != nil {
+	if err := db.CreateBrokerSecret(context.Background(), secret); err != nil {
 		t.Fatalf("failed to create host secret: %v", err)
 	}
 
@@ -63,8 +63,8 @@ func TestAuthenticatedHostClient_CreateAgent(t *testing.T) {
 		receivedHeaders = r.Header.Clone()
 
 		// Verify HMAC headers are present
-		if r.Header.Get(apiclient.HeaderHostID) == "" {
-			t.Error("missing X-Scion-Host-ID header")
+		if r.Header.Get(apiclient.HeaderBrokerID) == "" {
+			t.Error("missing X-Scion-Broker-ID header")
 		}
 		if r.Header.Get(apiclient.HeaderTimestamp) == "" {
 			t.Error("missing X-Scion-Timestamp header")
@@ -77,8 +77,8 @@ func TestAuthenticatedHostClient_CreateAgent(t *testing.T) {
 		}
 
 		// Verify host ID matches
-		if got := r.Header.Get(apiclient.HeaderHostID); got != hostID {
-			t.Errorf("wrong host ID: got %s, want %s", got, hostID)
+		if got := r.Header.Get(apiclient.HeaderBrokerID); got != brokerID {
+			t.Errorf("wrong host ID: got %s, want %s", got, brokerID)
 		}
 
 		requestValidated = true
@@ -107,7 +107,7 @@ func TestAuthenticatedHostClient_CreateAgent(t *testing.T) {
 		GroveID: "grove-1",
 	}
 
-	resp, err := client.CreateAgent(context.Background(), hostID, server.URL, req)
+	resp, err := client.CreateAgent(context.Background(), brokerID, server.URL, req)
 	if err != nil {
 		t.Fatalf("CreateAgent failed: %v", err)
 	}
@@ -143,30 +143,30 @@ func TestAuthenticatedHostClient_StartAgent(t *testing.T) {
 	}
 
 	// Create a test host
-	hostID := "test-host-456"
+	brokerID := "test-host-456"
 	secretKey := []byte("another-secret-key-32-bytes!!!!!")
 
-	host := &store.RuntimeHost{
-		ID:      hostID,
+	broker := &store.RuntimeBroker{
+		ID:      brokerID,
 		Name:    "test-host-2",
 		Slug:    "test-host-2",
-		Mode:    store.HostModeConnected,
-		Status:  store.HostStatusOnline,
+		Mode:    store.BrokerModeConnected,
+		Status:  store.BrokerStatusOnline,
 		Created: time.Now(),
 		Updated: time.Now(),
 	}
-	if err := db.CreateRuntimeHost(context.Background(), host); err != nil {
+	if err := db.CreateRuntimeBroker(context.Background(), broker); err != nil {
 		t.Fatalf("failed to create runtime host: %v", err)
 	}
 
-	secret := &store.HostSecret{
-		HostID:    hostID,
+	secret := &store.BrokerSecret{
+		BrokerID:    brokerID,
 		SecretKey: secretKey,
-		Algorithm: store.HostSecretAlgorithmHMACSHA256,
-		Status:    store.HostSecretStatusActive,
+		Algorithm: store.BrokerSecretAlgorithmHMACSHA256,
+		Status:    store.BrokerSecretStatusActive,
 		CreatedAt: time.Now(),
 	}
-	if err := db.CreateHostSecret(context.Background(), secret); err != nil {
+	if err := db.CreateBrokerSecret(context.Background(), secret); err != nil {
 		t.Fatalf("failed to create host secret: %v", err)
 	}
 
@@ -191,7 +191,7 @@ func TestAuthenticatedHostClient_StartAgent(t *testing.T) {
 	client := NewAuthenticatedHostClient(db, false)
 
 	// Make request
-	err = client.StartAgent(context.Background(), hostID, server.URL, "my-agent")
+	err = client.StartAgent(context.Background(), brokerID, server.URL, "my-agent")
 	if err != nil {
 		t.Fatalf("StartAgent failed: %v", err)
 	}
@@ -218,18 +218,18 @@ func TestAuthenticatedHostClient_MissingSecret(t *testing.T) {
 	}
 
 	// Create a test host without a secret
-	hostID := "test-host-no-secret"
+	brokerID := "test-host-no-secret"
 
-	host := &store.RuntimeHost{
-		ID:      hostID,
+	broker := &store.RuntimeBroker{
+		ID:      brokerID,
 		Name:    "test-host-no-secret",
 		Slug:    "test-host-no-secret",
-		Mode:    store.HostModeConnected,
-		Status:  store.HostStatusOnline,
+		Mode:    store.BrokerModeConnected,
+		Status:  store.BrokerStatusOnline,
 		Created: time.Now(),
 		Updated: time.Now(),
 	}
-	if err := db.CreateRuntimeHost(context.Background(), host); err != nil {
+	if err := db.CreateRuntimeBroker(context.Background(), broker); err != nil {
 		t.Fatalf("failed to create runtime host: %v", err)
 	}
 
@@ -256,7 +256,7 @@ func TestAuthenticatedHostClient_MissingSecret(t *testing.T) {
 		GroveID: "grove-1",
 	}
 
-	_, err = client.CreateAgent(context.Background(), hostID, server.URL, req)
+	_, err = client.CreateAgent(context.Background(), brokerID, server.URL, req)
 	if err != nil {
 		t.Fatalf("CreateAgent failed: %v", err)
 	}
@@ -280,31 +280,31 @@ func TestAuthenticatedHostClient_ExpiredSecret(t *testing.T) {
 	}
 
 	// Create a test host with expired secret
-	hostID := "test-host-expired"
+	brokerID := "test-host-expired"
 	secretKey := []byte("expired-secret-key-32-bytes!!!!!")
 
-	host := &store.RuntimeHost{
-		ID:      hostID,
+	broker := &store.RuntimeBroker{
+		ID:      brokerID,
 		Name:    "test-host-expired",
 		Slug:    "test-host-expired",
-		Mode:    store.HostModeConnected,
-		Status:  store.HostStatusOnline,
+		Mode:    store.BrokerModeConnected,
+		Status:  store.BrokerStatusOnline,
 		Created: time.Now(),
 		Updated: time.Now(),
 	}
-	if err := db.CreateRuntimeHost(context.Background(), host); err != nil {
+	if err := db.CreateRuntimeBroker(context.Background(), broker); err != nil {
 		t.Fatalf("failed to create runtime host: %v", err)
 	}
 
-	secret := &store.HostSecret{
-		HostID:    hostID,
+	secret := &store.BrokerSecret{
+		BrokerID:    brokerID,
 		SecretKey: secretKey,
-		Algorithm: store.HostSecretAlgorithmHMACSHA256,
-		Status:    store.HostSecretStatusActive,
+		Algorithm: store.BrokerSecretAlgorithmHMACSHA256,
+		Status:    store.BrokerSecretStatusActive,
 		CreatedAt: time.Now().Add(-2 * time.Hour),
 		ExpiresAt: time.Now().Add(-1 * time.Hour), // Expired 1 hour ago
 	}
-	if err := db.CreateHostSecret(context.Background(), secret); err != nil {
+	if err := db.CreateBrokerSecret(context.Background(), secret); err != nil {
 		t.Fatalf("failed to create host secret: %v", err)
 	}
 
@@ -329,7 +329,7 @@ func TestAuthenticatedHostClient_ExpiredSecret(t *testing.T) {
 		GroveID: "grove-1",
 	}
 
-	_, err = client.CreateAgent(context.Background(), hostID, server.URL, req)
+	_, err = client.CreateAgent(context.Background(), brokerID, server.URL, req)
 	if err != nil {
 		t.Fatalf("CreateAgent failed: %v", err)
 	}
@@ -353,30 +353,30 @@ func TestAuthenticatedHostClient_AllOperations(t *testing.T) {
 	}
 
 	// Create a test host
-	hostID := "test-host-ops"
+	brokerID := "test-host-ops"
 	secretKey := []byte("ops-test-secret-key-32-bytes!!!!")
 
-	host := &store.RuntimeHost{
-		ID:      hostID,
+	broker := &store.RuntimeBroker{
+		ID:      brokerID,
 		Name:    "test-host-ops",
 		Slug:    "test-host-ops",
-		Mode:    store.HostModeConnected,
-		Status:  store.HostStatusOnline,
+		Mode:    store.BrokerModeConnected,
+		Status:  store.BrokerStatusOnline,
 		Created: time.Now(),
 		Updated: time.Now(),
 	}
-	if err := db.CreateRuntimeHost(context.Background(), host); err != nil {
+	if err := db.CreateRuntimeBroker(context.Background(), broker); err != nil {
 		t.Fatalf("failed to create runtime host: %v", err)
 	}
 
-	secret := &store.HostSecret{
-		HostID:    hostID,
+	secret := &store.BrokerSecret{
+		BrokerID:    brokerID,
 		SecretKey: secretKey,
-		Algorithm: store.HostSecretAlgorithmHMACSHA256,
-		Status:    store.HostSecretStatusActive,
+		Algorithm: store.BrokerSecretAlgorithmHMACSHA256,
+		Status:    store.BrokerSecretStatusActive,
 		CreatedAt: time.Now(),
 	}
-	if err := db.CreateHostSecret(context.Background(), secret); err != nil {
+	if err := db.CreateBrokerSecret(context.Background(), secret); err != nil {
 		t.Fatalf("failed to create host secret: %v", err)
 	}
 
@@ -406,32 +406,32 @@ func TestAuthenticatedHostClient_AllOperations(t *testing.T) {
 	ctx := context.Background()
 
 	// Test all operations
-	_, err = client.CreateAgent(ctx, hostID, server.URL, &RemoteCreateAgentRequest{Name: "test"})
+	_, err = client.CreateAgent(ctx, brokerID, server.URL, &RemoteCreateAgentRequest{Name: "test"})
 	if err != nil {
 		t.Errorf("CreateAgent failed: %v", err)
 	}
 
-	err = client.StartAgent(ctx, hostID, server.URL, "test-agent")
+	err = client.StartAgent(ctx, brokerID, server.URL, "test-agent")
 	if err != nil {
 		t.Errorf("StartAgent failed: %v", err)
 	}
 
-	err = client.StopAgent(ctx, hostID, server.URL, "test-agent")
+	err = client.StopAgent(ctx, brokerID, server.URL, "test-agent")
 	if err != nil {
 		t.Errorf("StopAgent failed: %v", err)
 	}
 
-	err = client.RestartAgent(ctx, hostID, server.URL, "test-agent")
+	err = client.RestartAgent(ctx, brokerID, server.URL, "test-agent")
 	if err != nil {
 		t.Errorf("RestartAgent failed: %v", err)
 	}
 
-	err = client.DeleteAgent(ctx, hostID, server.URL, "test-agent", true, true)
+	err = client.DeleteAgent(ctx, brokerID, server.URL, "test-agent", true, true)
 	if err != nil {
 		t.Errorf("DeleteAgent failed: %v", err)
 	}
 
-	err = client.MessageAgent(ctx, hostID, server.URL, "test-agent", "hello", false)
+	err = client.MessageAgent(ctx, brokerID, server.URL, "test-agent", "hello", false)
 	if err != nil {
 		t.Errorf("MessageAgent failed: %v", err)
 	}

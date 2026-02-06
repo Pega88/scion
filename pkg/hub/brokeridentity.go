@@ -5,47 +5,47 @@ import (
 	"context"
 )
 
-// HostIdentity represents an authenticated Runtime Host.
-type HostIdentity interface {
+// BrokerIdentity represents an authenticated Runtime Host.
+type BrokerIdentity interface {
 	Identity
-	HostID() string
+	BrokerID() string
 }
 
-// hostIdentityImpl implements HostIdentity.
-type hostIdentityImpl struct {
-	hostID string
+// brokerIdentityImpl implements BrokerIdentity.
+type brokerIdentityImpl struct {
+	brokerID string
 }
 
 // ID returns the host ID.
-func (h *hostIdentityImpl) ID() string { return h.hostID }
+func (h *brokerIdentityImpl) ID() string { return h.brokerID }
 
 // Type returns the identity type ("host").
-func (h *hostIdentityImpl) Type() string { return "host" }
+func (h *brokerIdentityImpl) Type() string { return "host" }
 
 // HostID returns the host ID.
-func (h *hostIdentityImpl) HostID() string { return h.hostID }
+func (h *brokerIdentityImpl) BrokerID() string { return h.brokerID }
 
-// NewHostIdentity creates a new HostIdentity.
-func NewHostIdentity(hostID string) HostIdentity {
-	return &hostIdentityImpl{hostID: hostID}
+// NewBrokerIdentity creates a new BrokerIdentity.
+func NewBrokerIdentity(brokerID string) BrokerIdentity {
+	return &brokerIdentityImpl{brokerID: brokerID}
 }
 
-// hostIdentityContextKey is the context key for HostIdentity.
-type hostIdentityContextKey struct{}
+// brokerIdentityContextKey is the context key for BrokerIdentity.
+type brokerIdentityContextKey struct{}
 
-// GetHostIdentityFromContext returns the HostIdentity from the context, if present.
-func GetHostIdentityFromContext(ctx context.Context) HostIdentity {
-	if identity, ok := ctx.Value(hostIdentityContextKey{}).(HostIdentity); ok {
+// GetBrokerIdentityFromContext returns the BrokerIdentity from the context, if present.
+func GetBrokerIdentityFromContext(ctx context.Context) BrokerIdentity {
+	if identity, ok := ctx.Value(brokerIdentityContextKey{}).(BrokerIdentity); ok {
 		return identity
 	}
 	// Also check the generic identity key
-	if identity, ok := ctx.Value(identityContextKey{}).(HostIdentity); ok {
+	if identity, ok := ctx.Value(identityContextKey{}).(BrokerIdentity); ok {
 		return identity
 	}
 	return nil
 }
 
-// contextWithHostIdentity returns a new context with the HostIdentity set.
-func contextWithHostIdentity(ctx context.Context, host HostIdentity) context.Context {
-	return context.WithValue(ctx, hostIdentityContextKey{}, host)
+// contextWithBrokerIdentity returns a new context with the BrokerIdentity set.
+func contextWithBrokerIdentity(ctx context.Context, broker BrokerIdentity) context.Context {
+	return context.WithValue(ctx, brokerIdentityContextKey{}, broker)
 }

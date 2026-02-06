@@ -46,7 +46,7 @@ func DefaultControlChannelConfig() ControlChannelConfig {
 
 // ControlChannelManager manages WebSocket connections from Runtime Hosts.
 type ControlChannelManager struct {
-	connections map[string]*HostConnection // hostID -> connection
+	connections map[string]*BrokerConnection // brokerID -> connection
 	mu          sync.RWMutex
 	config      ControlChannelConfig
 	upgrader    websocket.Upgrader
@@ -55,7 +55,7 @@ type ControlChannelManager struct {
 // NewControlChannelManager creates a new control channel manager.
 func NewControlChannelManager(config ControlChannelConfig) *ControlChannelManager {
 	return &ControlChannelManager{
-		connections: make(map[string]*HostConnection),
+		connections: make(map[string]*BrokerConnection),
 		config:      config,
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  4096,
@@ -68,9 +68,9 @@ func NewControlChannelManager(config ControlChannelConfig) *ControlChannelManage
 	}
 }
 
-// HostConnection represents an active control channel connection to a Runtime Host.
-type HostConnection struct {
-	hostID    string
+// BrokerConnection represents an active control channel connection to a Runtime Host.
+type BrokerConnection struct {
+	brokerID    string
 	sessionID string
 	conn      *wsprotocol.Connection
 	config    ControlChannelConfig
@@ -158,7 +158,7 @@ func (s *StreamProxy) Close() {
 }
 
 // HandleUpgrade upgrades an HTTP connection to a WebSocket control channel.
-func (m *ControlChannelManager) HandleUpgrade(w http.ResponseWriter, r *http.Request, hostID string) error {
+func (m *ControlChannelManager) HandleUpgrade(w http.ResponseWriter, r *http.Request, brokerID string) error {
 	conn, err := m.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return fmt.Errorf("websocket upgrade failed: %w", err)
@@ -176,8 +176,8 @@ func (m *ControlChannelManager) HandleUpgrade(w http.ResponseWriter, r *http.Req
 	ctx, cancel := context.WithCancel(context.Background())
 	sessionID := uuid.New().String()
 
-	hostConn := &HostConnection{
-		hostID:          hostID,
+	brokerConn := &BrokerConnection{
+		brokerID:          brokerID,
 		sessionID:       sessionID,
 		conn:            wsConn,
 		config:          m.config,
@@ -190,24 +190,24 @@ func (m *ControlChannelManager) HandleUpgrade(w http.ResponseWriter, r *http.Req
 
 	// Register the connection
 	m.mu.Lock()
-	if existing, ok := m.connections[hostID]; ok {
+	if existing, ok := m.connections[brokerID]; ok {
 		// Close existing connection
 		existing.Close()
 	}
-	m.connections[hostID] = hostConn
+	m.connections[brokerID] = brokerConn
 	m.mu.Unlock()
 
-	slog.Info("Host control channel connected", "hostID", hostID, "sessionID", sessionID)
+	slog.Info("Host control channel connected", "brokerID", brokerID, "sessionID", sessionID)
 
 	// Start message handler
-	go m.handleConnection(hostConn)
+	go m.handleConnection(brokerConn)
 
 	// Send connected message
-	connectedMsg := wsprotocol.NewConnectedMessage(hostID, sessionID, int(m.config.PingInterval.Milliseconds()))
+	connectedMsg := wsprotocol.NewConnectedMessage(brokerID, sessionID, int(m.config.PingInterval.Milliseconds()))
 	if err := wsConn.WriteJSON(connectedMsg); err != nil {
-		slog.Error("Failed to send connected message", "hostID", hostID, "error", err)
-		hostConn.Close()
-		m.removeConnection(hostID)
+		slog.Error("Failed to send connected message", "brokerID", brokerID, "error", err)
+		brokerConn.Close()
+		m.removeConnection(brokerID)
 		return err
 	}
 
@@ -215,11 +215,11 @@ func (m *ControlChannelManager) HandleUpgrade(w http.ResponseWriter, r *http.Req
 }
 
 // handleConnection handles messages from a connected host.
-func (m *ControlChannelManager) handleConnection(hc *HostConnection) {
+func (m *ControlChannelManager) handleConnection(hc *BrokerConnection) {
 	defer func() {
 		hc.Close()
-		m.removeConnection(hc.hostID)
-		slog.Info("Host control channel disconnected", "hostID", hc.hostID)
+		m.removeConnection(hc.brokerID)
+		slog.Info("Host control channel disconnected", "brokerID", hc.brokerID)
 	}()
 
 	// Set up pong handler
@@ -236,7 +236,7 @@ func (m *ControlChannelManager) handleConnection(hc *HostConnection) {
 
 	// Set initial read deadline
 	if err := hc.conn.SetReadDeadline(time.Now().Add(m.config.PongWait)); err != nil {
-		slog.Error("Failed to set read deadline", "hostID", hc.hostID, "error", err)
+		slog.Error("Failed to set read deadline", "brokerID", hc.brokerID, "error", err)
 		return
 	}
 
@@ -250,19 +250,19 @@ func (m *ControlChannelManager) handleConnection(hc *HostConnection) {
 		_, data, err := hc.conn.ReadMessage()
 		if err != nil {
 			if wsprotocol.IsUnexpectedCloseError(err, wsprotocol.CloseGoingAway, wsprotocol.CloseNormalClosure) {
-				slog.Error("Control channel read error", "hostID", hc.hostID, "error", err)
+				slog.Error("Control channel read error", "brokerID", hc.brokerID, "error", err)
 			}
 			return
 		}
 
 		if err := m.handleMessage(hc, data); err != nil {
-			slog.Error("Control channel message handling error", "hostID", hc.hostID, "error", err)
+			slog.Error("Control channel message handling error", "brokerID", hc.brokerID, "error", err)
 		}
 	}
 }
 
 // handleMessage processes a single message from a host.
-func (m *ControlChannelManager) handleMessage(hc *HostConnection, data []byte) error {
+func (m *ControlChannelManager) handleMessage(hc *BrokerConnection, data []byte) error {
 	env, err := wsprotocol.ParseEnvelope(data)
 	if err != nil {
 		return fmt.Errorf("failed to parse message: %w", err)
@@ -273,7 +273,7 @@ func (m *ControlChannelManager) handleMessage(hc *HostConnection, data []byte) e
 		// Client sent connect message after we already sent connected.
 		// This is expected - just acknowledge we received it.
 		if m.config.Debug {
-			slog.Debug("Received connect message from host (already connected)", "hostID", hc.hostID)
+			slog.Debug("Received connect message from host (already connected)", "brokerID", hc.brokerID)
 		}
 		return nil
 	case wsprotocol.TypeResponse:
@@ -289,14 +289,14 @@ func (m *ControlChannelManager) handleMessage(hc *HostConnection, data []byte) e
 		return nil
 	default:
 		if m.config.Debug {
-			slog.Debug("Unknown message type from host", "hostID", hc.hostID, "type", env.Type)
+			slog.Debug("Unknown message type from host", "brokerID", hc.brokerID, "type", env.Type)
 		}
 		return nil
 	}
 }
 
 // handleResponse processes a response message from a host.
-func (m *ControlChannelManager) handleResponse(hc *HostConnection, data []byte) error {
+func (m *ControlChannelManager) handleResponse(hc *BrokerConnection, data []byte) error {
 	var resp wsprotocol.ResponseEnvelope
 	if err := json.Unmarshal(data, &resp); err != nil {
 		return fmt.Errorf("failed to parse response: %w", err)
@@ -323,7 +323,7 @@ func (m *ControlChannelManager) handleResponse(hc *HostConnection, data []byte) 
 }
 
 // handleStreamData processes stream data from a host.
-func (m *ControlChannelManager) handleStreamData(hc *HostConnection, data []byte) error {
+func (m *ControlChannelManager) handleStreamData(hc *BrokerConnection, data []byte) error {
 	var frame wsprotocol.StreamFrame
 	if err := json.Unmarshal(data, &frame); err != nil {
 		return fmt.Errorf("failed to parse stream frame: %w", err)
@@ -344,7 +344,7 @@ func (m *ControlChannelManager) handleStreamData(hc *HostConnection, data []byte
 }
 
 // handleStreamClose processes a stream close message.
-func (m *ControlChannelManager) handleStreamClose(hc *HostConnection, data []byte) error {
+func (m *ControlChannelManager) handleStreamClose(hc *BrokerConnection, data []byte) error {
 	var close wsprotocol.StreamCloseMessage
 	if err := json.Unmarshal(data, &close); err != nil {
 		return fmt.Errorf("failed to parse stream close: %w", err)
@@ -369,7 +369,7 @@ func (m *ControlChannelManager) handleStreamClose(hc *HostConnection, data []byt
 }
 
 // handleEvent processes an event message from a host.
-func (m *ControlChannelManager) handleEvent(hc *HostConnection, data []byte) error {
+func (m *ControlChannelManager) handleEvent(hc *BrokerConnection, data []byte) error {
 	var event wsprotocol.EventMessage
 	if err := json.Unmarshal(data, &event); err != nil {
 		return fmt.Errorf("failed to parse event: %w", err)
@@ -380,16 +380,16 @@ func (m *ControlChannelManager) handleEvent(hc *HostConnection, data []byte) err
 		// Update last activity time
 		hc.lastPongAt = time.Now()
 		if m.config.Debug {
-			slog.Debug("Control channel heartbeat from host", "hostID", hc.hostID)
+			slog.Debug("Control channel heartbeat from host", "brokerID", hc.brokerID)
 		}
 	case wsprotocol.EventAgentStatus:
 		// TODO: Forward to interested clients
 		if m.config.Debug {
-			slog.Debug("Agent status update via control channel", "hostID", hc.hostID)
+			slog.Debug("Agent status update via control channel", "brokerID", hc.brokerID)
 		}
 	default:
 		if m.config.Debug {
-			slog.Debug("Unknown control channel event", "hostID", hc.hostID, "event", event.Event)
+			slog.Debug("Unknown control channel event", "brokerID", hc.brokerID, "event", event.Event)
 		}
 	}
 
@@ -397,7 +397,7 @@ func (m *ControlChannelManager) handleEvent(hc *HostConnection, data []byte) err
 }
 
 // pingLoop sends periodic pings to keep the connection alive.
-func (m *ControlChannelManager) pingLoop(hc *HostConnection) {
+func (m *ControlChannelManager) pingLoop(hc *BrokerConnection) {
 	ticker := time.NewTicker(m.config.PingInterval)
 	defer ticker.Stop()
 
@@ -408,7 +408,7 @@ func (m *ControlChannelManager) pingLoop(hc *HostConnection) {
 		case <-ticker.C:
 			hc.lastPingAt = time.Now()
 			if err := hc.conn.WritePing(); err != nil {
-				slog.Error("Failed to ping host", "hostID", hc.hostID, "error", err)
+				slog.Error("Failed to ping host", "brokerID", hc.brokerID, "error", err)
 				hc.cancel()
 				return
 			}
@@ -417,62 +417,62 @@ func (m *ControlChannelManager) pingLoop(hc *HostConnection) {
 }
 
 // removeConnection removes a host connection from the manager.
-func (m *ControlChannelManager) removeConnection(hostID string) {
+func (m *ControlChannelManager) removeConnection(brokerID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	delete(m.connections, hostID)
+	delete(m.connections, brokerID)
 }
 
 // GetConnection returns the connection for a host, or nil if not connected.
-func (m *ControlChannelManager) GetConnection(hostID string) *HostConnection {
+func (m *ControlChannelManager) GetConnection(brokerID string) *BrokerConnection {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.connections[hostID]
+	return m.connections[brokerID]
 }
 
 // IsConnected returns true if the host has an active control channel.
-func (m *ControlChannelManager) IsConnected(hostID string) bool {
+func (m *ControlChannelManager) IsConnected(brokerID string) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	_, ok := m.connections[hostID]
+	_, ok := m.connections[brokerID]
 	return ok
 }
 
 // TunnelRequest sends an HTTP request through the control channel.
-func (m *ControlChannelManager) TunnelRequest(ctx context.Context, hostID string, req *wsprotocol.RequestEnvelope) (*wsprotocol.ResponseEnvelope, error) {
-	hc := m.GetConnection(hostID)
+func (m *ControlChannelManager) TunnelRequest(ctx context.Context, brokerID string, req *wsprotocol.RequestEnvelope) (*wsprotocol.ResponseEnvelope, error) {
+	hc := m.GetConnection(brokerID)
 	if hc == nil {
-		return nil, fmt.Errorf("host %s not connected", hostID)
+		return nil, fmt.Errorf("host %s not connected", brokerID)
 	}
 
 	return hc.TunnelRequest(ctx, req)
 }
 
 // OpenStream opens a new multiplexed stream to a host.
-func (m *ControlChannelManager) OpenStream(ctx context.Context, hostID, streamType, agentID string, cols, rows int) (*StreamProxy, error) {
-	hc := m.GetConnection(hostID)
+func (m *ControlChannelManager) OpenStream(ctx context.Context, brokerID, streamType, agentID string, cols, rows int) (*StreamProxy, error) {
+	hc := m.GetConnection(brokerID)
 	if hc == nil {
-		return nil, fmt.Errorf("host %s not connected", hostID)
+		return nil, fmt.Errorf("host %s not connected", brokerID)
 	}
 
 	return hc.OpenStream(ctx, streamType, agentID, cols, rows)
 }
 
 // SendStreamData sends data on an existing stream.
-func (m *ControlChannelManager) SendStreamData(hostID, streamID string, data []byte) error {
-	hc := m.GetConnection(hostID)
+func (m *ControlChannelManager) SendStreamData(brokerID, streamID string, data []byte) error {
+	hc := m.GetConnection(brokerID)
 	if hc == nil {
-		return fmt.Errorf("host %s not connected", hostID)
+		return fmt.Errorf("host %s not connected", brokerID)
 	}
 
 	return hc.SendStreamData(streamID, data)
 }
 
 // CloseStream closes a stream.
-func (m *ControlChannelManager) CloseStream(hostID, streamID, reason string) error {
-	hc := m.GetConnection(hostID)
+func (m *ControlChannelManager) CloseStream(brokerID, streamID, reason string) error {
+	hc := m.GetConnection(brokerID)
 	if hc == nil {
-		return fmt.Errorf("host %s not connected", hostID)
+		return fmt.Errorf("host %s not connected", brokerID)
 	}
 
 	return hc.CloseStream(streamID, reason)
@@ -484,8 +484,8 @@ func (m *ControlChannelManager) ListConnectedHosts() []string {
 	defer m.mu.RUnlock()
 
 	hosts := make([]string, 0, len(m.connections))
-	for hostID := range m.connections {
-		hosts = append(hosts, hostID)
+	for brokerID := range m.connections {
+		hosts = append(hosts, brokerID)
 	}
 	return hosts
 }
@@ -495,16 +495,16 @@ func (m *ControlChannelManager) Shutdown() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	for hostID, conn := range m.connections {
+	for brokerID, conn := range m.connections {
 		conn.Close()
-		delete(m.connections, hostID)
+		delete(m.connections, brokerID)
 	}
 }
 
-// HostConnection methods
+// BrokerConnection methods
 
 // TunnelRequest sends an HTTP request through the control channel and waits for a response.
-func (hc *HostConnection) TunnelRequest(ctx context.Context, req *wsprotocol.RequestEnvelope) (*wsprotocol.ResponseEnvelope, error) {
+func (hc *BrokerConnection) TunnelRequest(ctx context.Context, req *wsprotocol.RequestEnvelope) (*wsprotocol.ResponseEnvelope, error) {
 	// Generate request ID if not set
 	if req.RequestID == "" {
 		req.RequestID = uuid.New().String()
@@ -547,7 +547,7 @@ func (hc *HostConnection) TunnelRequest(ctx context.Context, req *wsprotocol.Req
 }
 
 // OpenStream opens a new multiplexed stream.
-func (hc *HostConnection) OpenStream(ctx context.Context, streamType, agentID string, cols, rows int) (*StreamProxy, error) {
+func (hc *BrokerConnection) OpenStream(ctx context.Context, streamType, agentID string, cols, rows int) (*StreamProxy, error) {
 	streamID := uuid.New().String()
 	stream := NewStreamProxy(streamID, streamType, agentID)
 
@@ -568,13 +568,13 @@ func (hc *HostConnection) OpenStream(ctx context.Context, streamType, agentID st
 }
 
 // SendStreamData sends data on an existing stream.
-func (hc *HostConnection) SendStreamData(streamID string, data []byte) error {
+func (hc *BrokerConnection) SendStreamData(streamID string, data []byte) error {
 	frame := wsprotocol.NewStreamFrame(streamID, data)
 	return hc.conn.WriteJSON(frame)
 }
 
 // CloseStream closes a stream.
-func (hc *HostConnection) CloseStream(streamID, reason string) error {
+func (hc *BrokerConnection) CloseStream(streamID, reason string) error {
 	hc.streamsMu.Lock()
 	stream, ok := hc.streams[streamID]
 	if ok {
@@ -591,7 +591,7 @@ func (hc *HostConnection) CloseStream(streamID, reason string) error {
 }
 
 // Close closes the host connection.
-func (hc *HostConnection) Close() {
+func (hc *BrokerConnection) Close() {
 	hc.cancel()
 
 	// Close all streams
@@ -615,16 +615,16 @@ func (hc *HostConnection) Close() {
 }
 
 // GetSessionID returns the session ID.
-func (hc *HostConnection) GetSessionID() string {
+func (hc *BrokerConnection) GetSessionID() string {
 	return hc.sessionID
 }
 
-// GetHostID returns the host ID.
-func (hc *HostConnection) GetHostID() string {
-	return hc.hostID
+// GetBrokerID returns the broker ID.
+func (hc *BrokerConnection) GetBrokerID() string {
+	return hc.brokerID
 }
 
 // GetConnectedAt returns when the connection was established.
-func (hc *HostConnection) GetConnectedAt() time.Time {
+func (hc *BrokerConnection) GetConnectedAt() time.Time {
 	return hc.connectedAt
 }

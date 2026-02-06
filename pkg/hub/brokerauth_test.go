@@ -21,7 +21,7 @@ import (
 	"github.com/ptone/scion-agent/pkg/store/sqlite"
 )
 
-func setupTestHostAuthService(t *testing.T) (*HostAuthService, store.Store) {
+func setupTestBrokerAuthService(t *testing.T) (*BrokerAuthService, store.Store) {
 	t.Helper()
 
 	s, err := sqlite.New(":memory:")
@@ -32,14 +32,14 @@ func setupTestHostAuthService(t *testing.T) (*HostAuthService, store.Store) {
 		t.Fatalf("failed to migrate store: %v", err)
 	}
 
-	config := DefaultHostAuthConfig()
-	svc := NewHostAuthService(config, s)
+	config := DefaultBrokerAuthConfig()
+	svc := NewBrokerAuthService(config, s)
 
 	return svc, s
 }
 
 func TestHostRegistrationAndJoin(t *testing.T) {
-	svc, _ := setupTestHostAuthService(t)
+	svc, _ := setupTestBrokerAuthService(t)
 	ctx := context.Background()
 
 	// Create a host registration
@@ -55,7 +55,7 @@ func TestHostRegistrationAndJoin(t *testing.T) {
 		t.Fatalf("CreateHostRegistration failed: %v", err)
 	}
 
-	if resp.HostID == "" {
+	if resp.BrokerID == "" {
 		t.Error("HostID should not be empty")
 	}
 	if resp.JoinToken == "" {
@@ -73,7 +73,7 @@ func TestHostRegistrationAndJoin(t *testing.T) {
 
 	// Complete the join
 	joinReq := HostJoinRequest{
-		HostID:    resp.HostID,
+		BrokerID:    resp.BrokerID,
 		JoinToken: resp.JoinToken,
 		Hostname:  "test-hostname",
 		Version:   "1.0.0",
@@ -84,8 +84,8 @@ func TestHostRegistrationAndJoin(t *testing.T) {
 		t.Fatalf("CompleteHostJoin failed: %v", err)
 	}
 
-	if joinResp.HostID != resp.HostID {
-		t.Errorf("HostID mismatch: got %s, want %s", joinResp.HostID, resp.HostID)
+	if joinResp.BrokerID != resp.BrokerID {
+		t.Errorf("HostID mismatch: got %s, want %s", joinResp.BrokerID, resp.BrokerID)
 	}
 	if joinResp.SecretKey == "" {
 		t.Error("SecretKey should not be empty")
@@ -105,7 +105,7 @@ func TestHostRegistrationAndJoin(t *testing.T) {
 }
 
 func TestJoinWithInvalidToken(t *testing.T) {
-	svc, _ := setupTestHostAuthService(t)
+	svc, _ := setupTestBrokerAuthService(t)
 	ctx := context.Background()
 
 	// Create a host registration
@@ -117,7 +117,7 @@ func TestJoinWithInvalidToken(t *testing.T) {
 
 	// Try to join with wrong token
 	joinReq := HostJoinRequest{
-		HostID:    resp.HostID,
+		BrokerID:    resp.BrokerID,
 		JoinToken: JoinTokenPrefix + "invalid-token",
 		Hostname:  "test",
 		Version:   "1.0.0",
@@ -142,9 +142,9 @@ func TestJoinWithExpiredToken(t *testing.T) {
 		t.Fatalf("failed to migrate store: %v", err)
 	}
 
-	config := DefaultHostAuthConfig()
+	config := DefaultBrokerAuthConfig()
 	config.JoinTokenExpiry = -1 * time.Hour // Already expired
-	svc := NewHostAuthService(config, s)
+	svc := NewBrokerAuthService(config, s)
 	ctx := context.Background()
 
 	// Create a host registration (token will already be expired)
@@ -156,7 +156,7 @@ func TestJoinWithExpiredToken(t *testing.T) {
 
 	// Try to join
 	joinReq := HostJoinRequest{
-		HostID:    resp.HostID,
+		BrokerID:    resp.BrokerID,
 		JoinToken: resp.JoinToken,
 		Hostname:  "test",
 		Version:   "1.0.0",
@@ -172,7 +172,7 @@ func TestJoinWithExpiredToken(t *testing.T) {
 }
 
 func TestJoinTokenSingleUse(t *testing.T) {
-	svc, _ := setupTestHostAuthService(t)
+	svc, _ := setupTestBrokerAuthService(t)
 	ctx := context.Background()
 
 	// Create and complete a host registration
@@ -183,7 +183,7 @@ func TestJoinTokenSingleUse(t *testing.T) {
 	}
 
 	joinReq := HostJoinRequest{
-		HostID:    resp.HostID,
+		BrokerID:    resp.BrokerID,
 		JoinToken: resp.JoinToken,
 		Hostname:  "test",
 		Version:   "1.0.0",
@@ -203,32 +203,32 @@ func TestJoinTokenSingleUse(t *testing.T) {
 }
 
 func TestValidateHostSignature(t *testing.T) {
-	svc, s := setupTestHostAuthService(t)
+	svc, s := setupTestBrokerAuthService(t)
 	ctx := context.Background()
 
 	// Create a host and set up its secret
-	hostID := uuid.New().String()
-	host := &store.RuntimeHost{
-		ID:      hostID,
+	brokerID := uuid.New().String()
+	broker := &store.RuntimeBroker{
+		ID:      brokerID,
 		Name:    "test-host",
 		Slug:    "test-host",
-		Mode:    store.HostModeConnected,
-		Status:  store.HostStatusOnline,
+		Mode:    store.BrokerModeConnected,
+		Status:  store.BrokerStatusOnline,
 		Created: time.Now(),
 		Updated: time.Now(),
 	}
-	if err := s.CreateRuntimeHost(ctx, host); err != nil {
+	if err := s.CreateRuntimeBroker(ctx, broker); err != nil {
 		t.Fatalf("failed to create runtime host: %v", err)
 	}
 
 	secretKey := []byte("test-secret-key-32-bytes-long!!")
-	secret := &store.HostSecret{
-		HostID:    hostID,
+	secret := &store.BrokerSecret{
+		BrokerID:    brokerID,
 		SecretKey: secretKey,
-		Algorithm: store.HostSecretAlgorithmHMACSHA256,
-		Status:    store.HostSecretStatusActive,
+		Algorithm: store.BrokerSecretAlgorithmHMACSHA256,
+		Status:    store.BrokerSecretStatusActive,
 	}
-	if err := s.CreateHostSecret(ctx, secret); err != nil {
+	if err := s.CreateBrokerSecret(ctx, secret); err != nil {
 		t.Fatalf("failed to create host secret: %v", err)
 	}
 
@@ -239,7 +239,7 @@ func TestValidateHostSignature(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/test", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set(HeaderHostID, hostID)
+	req.Header.Set(HeaderBrokerID, brokerID)
 	req.Header.Set(HeaderTimestamp, timestamp)
 	req.Header.Set(HeaderNonce, nonce)
 
@@ -260,8 +260,8 @@ func TestValidateHostSignature(t *testing.T) {
 		t.Fatalf("ValidateHostSignature failed: %v", err)
 	}
 
-	if identity.HostID() != hostID {
-		t.Errorf("HostID mismatch: got %s, want %s", identity.HostID(), hostID)
+	if identity.BrokerID() != brokerID {
+		t.Errorf("HostID mismatch: got %s, want %s", identity.BrokerID(), brokerID)
 	}
 	if identity.Type() != "host" {
 		t.Errorf("Type mismatch: got %s, want host", identity.Type())
@@ -269,37 +269,37 @@ func TestValidateHostSignature(t *testing.T) {
 }
 
 func TestValidateHostSignature_InvalidSignature(t *testing.T) {
-	svc, s := setupTestHostAuthService(t)
+	svc, s := setupTestBrokerAuthService(t)
 	ctx := context.Background()
 
 	// Create a host with secret
-	hostID := uuid.New().String()
-	host := &store.RuntimeHost{
-		ID:      hostID,
+	brokerID := uuid.New().String()
+	broker := &store.RuntimeBroker{
+		ID:      brokerID,
 		Name:    "test-host",
 		Slug:    "test-host",
-		Mode:    store.HostModeConnected,
-		Status:  store.HostStatusOnline,
+		Mode:    store.BrokerModeConnected,
+		Status:  store.BrokerStatusOnline,
 		Created: time.Now(),
 		Updated: time.Now(),
 	}
-	if err := s.CreateRuntimeHost(ctx, host); err != nil {
+	if err := s.CreateRuntimeBroker(ctx, broker); err != nil {
 		t.Fatalf("failed to create runtime host: %v", err)
 	}
 
-	secret := &store.HostSecret{
-		HostID:    hostID,
+	secret := &store.BrokerSecret{
+		BrokerID:    brokerID,
 		SecretKey: []byte("correct-secret-key-32-bytes-ok!"),
-		Algorithm: store.HostSecretAlgorithmHMACSHA256,
-		Status:    store.HostSecretStatusActive,
+		Algorithm: store.BrokerSecretAlgorithmHMACSHA256,
+		Status:    store.BrokerSecretStatusActive,
 	}
-	if err := s.CreateHostSecret(ctx, secret); err != nil {
+	if err := s.CreateBrokerSecret(ctx, secret); err != nil {
 		t.Fatalf("failed to create host secret: %v", err)
 	}
 
 	// Create a request with wrong signature
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/test", nil)
-	req.Header.Set(HeaderHostID, hostID)
+	req.Header.Set(HeaderBrokerID, brokerID)
 	req.Header.Set(HeaderTimestamp, strconv.FormatInt(time.Now().Unix(), 10))
 	req.Header.Set(HeaderNonce, "test-nonce")
 	req.Header.Set(HeaderSignature, "invalid-signature")
@@ -323,40 +323,40 @@ func TestValidateHostSignature_ClockSkew(t *testing.T) {
 		t.Fatalf("failed to migrate store: %v", err)
 	}
 
-	config := DefaultHostAuthConfig()
+	config := DefaultBrokerAuthConfig()
 	config.MaxClockSkew = 1 * time.Second
-	svc := NewHostAuthService(config, s)
+	svc := NewBrokerAuthService(config, s)
 	ctx := context.Background()
 
 	// Create a host with secret
-	hostID := uuid.New().String()
-	host := &store.RuntimeHost{
-		ID:      hostID,
+	brokerID := uuid.New().String()
+	broker := &store.RuntimeBroker{
+		ID:      brokerID,
 		Name:    "test-host",
 		Slug:    "test-host",
-		Mode:    store.HostModeConnected,
-		Status:  store.HostStatusOnline,
+		Mode:    store.BrokerModeConnected,
+		Status:  store.BrokerStatusOnline,
 		Created: time.Now(),
 		Updated: time.Now(),
 	}
-	if err := s.CreateRuntimeHost(ctx, host); err != nil {
+	if err := s.CreateRuntimeBroker(ctx, broker); err != nil {
 		t.Fatalf("failed to create runtime host: %v", err)
 	}
 
-	secret := &store.HostSecret{
-		HostID:    hostID,
+	secret := &store.BrokerSecret{
+		BrokerID:    brokerID,
 		SecretKey: []byte("test-secret-key-32-bytes-long!!"),
-		Algorithm: store.HostSecretAlgorithmHMACSHA256,
-		Status:    store.HostSecretStatusActive,
+		Algorithm: store.BrokerSecretAlgorithmHMACSHA256,
+		Status:    store.BrokerSecretStatusActive,
 	}
-	if err := s.CreateHostSecret(ctx, secret); err != nil {
+	if err := s.CreateBrokerSecret(ctx, secret); err != nil {
 		t.Fatalf("failed to create host secret: %v", err)
 	}
 
 	// Create a request with old timestamp
 	oldTimestamp := strconv.FormatInt(time.Now().Add(-10*time.Minute).Unix(), 10)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/test", nil)
-	req.Header.Set(HeaderHostID, hostID)
+	req.Header.Set(HeaderBrokerID, brokerID)
 	req.Header.Set(HeaderTimestamp, oldTimestamp)
 	req.Header.Set(HeaderNonce, "test-nonce")
 	req.Header.Set(HeaderSignature, "some-signature")
@@ -371,7 +371,7 @@ func TestValidateHostSignature_ClockSkew(t *testing.T) {
 }
 
 func TestValidateHostSignature_MissingHeaders(t *testing.T) {
-	svc, _ := setupTestHostAuthService(t)
+	svc, _ := setupTestBrokerAuthService(t)
 	ctx := context.Background()
 
 	tests := []struct {
@@ -385,12 +385,12 @@ func TestValidateHostSignature_MissingHeaders(t *testing.T) {
 				r.Header.Set(HeaderTimestamp, strconv.FormatInt(time.Now().Unix(), 10))
 				r.Header.Set(HeaderSignature, "sig")
 			},
-			expectedErr: "missing X-Scion-Host-ID",
+			expectedErr: "missing X-Scion-Broker-ID",
 		},
 		{
 			name: "missing timestamp",
 			setupReq: func(r *http.Request) {
-				r.Header.Set(HeaderHostID, "host-id")
+				r.Header.Set(HeaderBrokerID, "host-id")
 				r.Header.Set(HeaderSignature, "sig")
 			},
 			expectedErr: "missing X-Scion-Timestamp",
@@ -398,7 +398,7 @@ func TestValidateHostSignature_MissingHeaders(t *testing.T) {
 		{
 			name: "missing signature",
 			setupReq: func(r *http.Request) {
-				r.Header.Set(HeaderHostID, "host-id")
+				r.Header.Set(HeaderBrokerID, "host-id")
 				r.Header.Set(HeaderTimestamp, strconv.FormatInt(time.Now().Unix(), 10))
 			},
 			expectedErr: "missing X-Scion-Signature",
@@ -421,45 +421,45 @@ func TestValidateHostSignature_MissingHeaders(t *testing.T) {
 	}
 }
 
-func TestHostAuthMiddleware(t *testing.T) {
-	svc, s := setupTestHostAuthService(t)
+func TestBrokerAuthMiddleware(t *testing.T) {
+	svc, s := setupTestBrokerAuthService(t)
 	ctx := context.Background()
 
 	// Create a host with secret
-	hostID := uuid.New().String()
-	host := &store.RuntimeHost{
-		ID:      hostID,
+	brokerID := uuid.New().String()
+	broker := &store.RuntimeBroker{
+		ID:      brokerID,
 		Name:    "middleware-test-host",
 		Slug:    "middleware-test-host",
-		Mode:    store.HostModeConnected,
-		Status:  store.HostStatusOnline,
+		Mode:    store.BrokerModeConnected,
+		Status:  store.BrokerStatusOnline,
 		Created: time.Now(),
 		Updated: time.Now(),
 	}
-	if err := s.CreateRuntimeHost(ctx, host); err != nil {
+	if err := s.CreateRuntimeBroker(ctx, broker); err != nil {
 		t.Fatalf("failed to create runtime host: %v", err)
 	}
 
 	secretKey := []byte("middleware-secret-key-32-bytes!!")
-	secret := &store.HostSecret{
-		HostID:    hostID,
+	secret := &store.BrokerSecret{
+		BrokerID:    brokerID,
 		SecretKey: secretKey,
-		Algorithm: store.HostSecretAlgorithmHMACSHA256,
-		Status:    store.HostSecretStatusActive,
+		Algorithm: store.BrokerSecretAlgorithmHMACSHA256,
+		Status:    store.BrokerSecretStatusActive,
 	}
-	if err := s.CreateHostSecret(ctx, secret); err != nil {
+	if err := s.CreateBrokerSecret(ctx, secret); err != nil {
 		t.Fatalf("failed to create host secret: %v", err)
 	}
 
 	// Create a handler that checks for host identity
-	var gotIdentity HostIdentity
+	var gotIdentity BrokerIdentity
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotIdentity = GetHostIdentityFromContext(r.Context())
+		gotIdentity = GetBrokerIdentityFromContext(r.Context())
 		w.WriteHeader(http.StatusOK)
 	})
 
 	// Wrap with middleware
-	wrapped := HostAuthMiddleware(svc)(handler)
+	wrapped := BrokerAuthMiddleware(svc)(handler)
 
 	// Test 1: Request without host ID header should pass through
 	t.Run("no host header passes through", func(t *testing.T) {
@@ -483,7 +483,7 @@ func TestHostAuthMiddleware(t *testing.T) {
 		nonce := "test-nonce"
 
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/test", nil)
-		req.Header.Set(HeaderHostID, hostID)
+		req.Header.Set(HeaderBrokerID, brokerID)
 		req.Header.Set(HeaderTimestamp, timestamp)
 		req.Header.Set(HeaderNonce, nonce)
 
@@ -503,8 +503,8 @@ func TestHostAuthMiddleware(t *testing.T) {
 		if gotIdentity == nil {
 			t.Fatal("Expected identity to be set")
 		}
-		if gotIdentity.HostID() != hostID {
-			t.Errorf("HostID mismatch: got %s, want %s", gotIdentity.HostID(), hostID)
+		if gotIdentity.BrokerID() != brokerID {
+			t.Errorf("HostID mismatch: got %s, want %s", gotIdentity.BrokerID(), brokerID)
 		}
 	})
 
@@ -512,7 +512,7 @@ func TestHostAuthMiddleware(t *testing.T) {
 	t.Run("invalid signature returns 401", func(t *testing.T) {
 		gotIdentity = nil
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/test", nil)
-		req.Header.Set(HeaderHostID, hostID)
+		req.Header.Set(HeaderBrokerID, brokerID)
 		req.Header.Set(HeaderTimestamp, strconv.FormatInt(time.Now().Unix(), 10))
 		req.Header.Set(HeaderNonce, "nonce")
 		req.Header.Set(HeaderSignature, "invalid-signature")
@@ -551,26 +551,26 @@ func TestSlugify(t *testing.T) {
 
 // TestGenerateAndStoreSecret tests the simplified secret generation for grove registration.
 func TestGenerateAndStoreSecret(t *testing.T) {
-	svc, s := setupTestHostAuthService(t)
+	svc, s := setupTestBrokerAuthService(t)
 	ctx := context.Background()
 
 	// Create a host first (GenerateAndStoreSecret requires an existing host)
-	hostID := uuid.New().String()
-	host := &store.RuntimeHost{
-		ID:      hostID,
+	brokerID := uuid.New().String()
+	broker := &store.RuntimeBroker{
+		ID:      brokerID,
 		Name:    "test-host",
 		Slug:    "test-host",
-		Mode:    store.HostModeConnected,
-		Status:  store.HostStatusOnline,
+		Mode:    store.BrokerModeConnected,
+		Status:  store.BrokerStatusOnline,
 		Created: time.Now(),
 		Updated: time.Now(),
 	}
-	if err := s.CreateRuntimeHost(ctx, host); err != nil {
+	if err := s.CreateRuntimeBroker(ctx, broker); err != nil {
 		t.Fatalf("failed to create runtime host: %v", err)
 	}
 
 	// Generate secret
-	secretKey, err := svc.GenerateAndStoreSecret(ctx, hostID)
+	secretKey, err := svc.GenerateAndStoreSecret(ctx, brokerID)
 	if err != nil {
 		t.Fatalf("GenerateAndStoreSecret failed: %v", err)
 	}
@@ -585,7 +585,7 @@ func TestGenerateAndStoreSecret(t *testing.T) {
 	}
 
 	// Verify secret was stored
-	storedSecret, err := s.GetHostSecret(ctx, hostID)
+	storedSecret, err := s.GetBrokerSecret(ctx, brokerID)
 	if err != nil {
 		t.Fatalf("failed to get stored secret: %v", err)
 	}
@@ -600,32 +600,32 @@ func TestGenerateAndStoreSecret(t *testing.T) {
 // TestGenerateAndStoreSecret_ReturnsExistingSecret tests that calling GenerateAndStoreSecret
 // multiple times for the same host returns the existing secret.
 func TestGenerateAndStoreSecret_ReturnsExistingSecret(t *testing.T) {
-	svc, s := setupTestHostAuthService(t)
+	svc, s := setupTestBrokerAuthService(t)
 	ctx := context.Background()
 
 	// Create a host
-	hostID := uuid.New().String()
-	host := &store.RuntimeHost{
-		ID:      hostID,
+	brokerID := uuid.New().String()
+	broker := &store.RuntimeBroker{
+		ID:      brokerID,
 		Name:    "test-host",
 		Slug:    "test-host",
-		Mode:    store.HostModeConnected,
-		Status:  store.HostStatusOnline,
+		Mode:    store.BrokerModeConnected,
+		Status:  store.BrokerStatusOnline,
 		Created: time.Now(),
 		Updated: time.Now(),
 	}
-	if err := s.CreateRuntimeHost(ctx, host); err != nil {
+	if err := s.CreateRuntimeBroker(ctx, broker); err != nil {
 		t.Fatalf("failed to create runtime host: %v", err)
 	}
 
 	// Generate secret first time
-	secretKey1, err := svc.GenerateAndStoreSecret(ctx, hostID)
+	secretKey1, err := svc.GenerateAndStoreSecret(ctx, brokerID)
 	if err != nil {
 		t.Fatalf("First GenerateAndStoreSecret failed: %v", err)
 	}
 
 	// Generate secret second time - should return same secret
-	secretKey2, err := svc.GenerateAndStoreSecret(ctx, hostID)
+	secretKey2, err := svc.GenerateAndStoreSecret(ctx, brokerID)
 	if err != nil {
 		t.Fatalf("Second GenerateAndStoreSecret failed: %v", err)
 	}
@@ -635,14 +635,14 @@ func TestGenerateAndStoreSecret_ReturnsExistingSecret(t *testing.T) {
 	}
 }
 
-// TestGenerateAndStoreSecret_RequiresHostID tests that empty hostID is rejected.
+// TestGenerateAndStoreSecret_RequiresHostID tests that empty brokerID is rejected.
 func TestGenerateAndStoreSecret_RequiresHostID(t *testing.T) {
-	svc, _ := setupTestHostAuthService(t)
+	svc, _ := setupTestBrokerAuthService(t)
 	ctx := context.Background()
 
 	_, err := svc.GenerateAndStoreSecret(ctx, "")
 	if err == nil {
-		t.Error("Expected error for empty hostID")
+		t.Error("Expected error for empty brokerID")
 	}
 	if !strings.Contains(err.Error(), "hostId is required") {
 		t.Errorf("Expected 'hostId is required' error, got: %v", err)
@@ -652,26 +652,26 @@ func TestGenerateAndStoreSecret_RequiresHostID(t *testing.T) {
 // TestGenerateAndStoreSecret_CanBeUsedForHMACAuth tests the full flow:
 // generate secret, then use it to authenticate a request.
 func TestGenerateAndStoreSecret_CanBeUsedForHMACAuth(t *testing.T) {
-	svc, s := setupTestHostAuthService(t)
+	svc, s := setupTestBrokerAuthService(t)
 	ctx := context.Background()
 
 	// Create a host
-	hostID := uuid.New().String()
-	host := &store.RuntimeHost{
-		ID:      hostID,
+	brokerID := uuid.New().String()
+	broker := &store.RuntimeBroker{
+		ID:      brokerID,
 		Name:    "auth-test-host",
 		Slug:    "auth-test-host",
-		Mode:    store.HostModeConnected,
-		Status:  store.HostStatusOnline,
+		Mode:    store.BrokerModeConnected,
+		Status:  store.BrokerStatusOnline,
 		Created: time.Now(),
 		Updated: time.Now(),
 	}
-	if err := s.CreateRuntimeHost(ctx, host); err != nil {
+	if err := s.CreateRuntimeBroker(ctx, broker); err != nil {
 		t.Fatalf("failed to create runtime host: %v", err)
 	}
 
 	// Generate secret
-	secretKeyB64, err := svc.GenerateAndStoreSecret(ctx, hostID)
+	secretKeyB64, err := svc.GenerateAndStoreSecret(ctx, brokerID)
 	if err != nil {
 		t.Fatalf("GenerateAndStoreSecret failed: %v", err)
 	}
@@ -686,7 +686,7 @@ func TestGenerateAndStoreSecret_CanBeUsedForHMACAuth(t *testing.T) {
 	nonce := "test-nonce-abc"
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/test", nil)
-	req.Header.Set(HeaderHostID, hostID)
+	req.Header.Set(HeaderBrokerID, brokerID)
 	req.Header.Set(HeaderTimestamp, timestamp)
 	req.Header.Set(HeaderNonce, nonce)
 
@@ -703,7 +703,7 @@ func TestGenerateAndStoreSecret_CanBeUsedForHMACAuth(t *testing.T) {
 		t.Fatalf("ValidateHostSignature failed: %v", err)
 	}
 
-	if identity.HostID() != hostID {
-		t.Errorf("HostID mismatch: got %s, want %s", identity.HostID(), hostID)
+	if identity.BrokerID() != brokerID {
+		t.Errorf("HostID mismatch: got %s, want %s", identity.BrokerID(), brokerID)
 	}
 }

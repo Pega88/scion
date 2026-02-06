@@ -65,8 +65,8 @@ type ServerConfig struct {
 	// AdminEmails is a list of email addresses that should be auto-promoted to admin role.
 	// Useful for bootstrapping the first admin user.
 	AdminEmails []string
-	// HostAuthConfig holds configuration for Runtime Host HMAC authentication.
-	HostAuthConfig HostAuthConfig
+	// BrokerAuthConfig holds configuration for Runtime Host HMAC authentication.
+	BrokerAuthConfig BrokerAuthConfig
 	// HubEndpoint is the public endpoint URL for this Hub (used in host join responses).
 	HubEndpoint string
 }
@@ -83,13 +83,13 @@ func DefaultServerConfig() ServerConfig {
 		CORSAllowedMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		CORSAllowedHeaders: []string{
 			"Authorization", "Content-Type",
-			"X-Scion-Host-Token", "X-Scion-Agent-Token", "X-API-Key",
+			"X-Scion-Broker-Token", "X-Scion-Agent-Token", "X-API-Key",
 			// Host HMAC authentication headers
-			"X-Scion-Host-ID", "X-Scion-Timestamp", "X-Scion-Nonce",
+			"X-Scion-Broker-ID", "X-Scion-Timestamp", "X-Scion-Nonce",
 			"X-Scion-Signature", "X-Scion-Signed-Headers",
 		},
 		CORSMaxAge:       3600,
-		HostAuthConfig:   DefaultHostAuthConfig(),
+		BrokerAuthConfig:   DefaultBrokerAuthConfig(),
 	}
 }
 
@@ -118,34 +118,34 @@ type AgentDispatcher interface {
 	DispatchAgentMessage(ctx context.Context, agent *store.Agent, message string, interrupt bool) error
 }
 
-// RuntimeHostClient is an interface for communicating with runtime hosts over HTTP.
+// RuntimeBrokerClient is an interface for communicating with runtime hosts over HTTP.
 // This allows the hub to dispatch operations to remote runtime hosts.
-// All methods take a hostID parameter which is used for HMAC authentication when
+// All methods take a brokerID parameter which is used for HMAC authentication when
 // the client supports it (AuthenticatedHostClient).
-type RuntimeHostClient interface {
+type RuntimeBrokerClient interface {
 	// CreateAgent creates an agent on a remote runtime host.
-	// hostID is used for HMAC authentication lookup.
-	CreateAgent(ctx context.Context, hostID, hostEndpoint string, req *RemoteCreateAgentRequest) (*RemoteAgentResponse, error)
+	// brokerID is used for HMAC authentication lookup.
+	CreateAgent(ctx context.Context, brokerID, hostEndpoint string, req *RemoteCreateAgentRequest) (*RemoteAgentResponse, error)
 
 	// StartAgent starts an agent on a remote runtime host.
-	// hostID is used for HMAC authentication lookup.
-	StartAgent(ctx context.Context, hostID, hostEndpoint, agentID string) error
+	// brokerID is used for HMAC authentication lookup.
+	StartAgent(ctx context.Context, brokerID, hostEndpoint, agentID string) error
 
 	// StopAgent stops an agent on a remote runtime host.
-	// hostID is used for HMAC authentication lookup.
-	StopAgent(ctx context.Context, hostID, hostEndpoint, agentID string) error
+	// brokerID is used for HMAC authentication lookup.
+	StopAgent(ctx context.Context, brokerID, hostEndpoint, agentID string) error
 
 	// RestartAgent restarts an agent on a remote runtime host.
-	// hostID is used for HMAC authentication lookup.
-	RestartAgent(ctx context.Context, hostID, hostEndpoint, agentID string) error
+	// brokerID is used for HMAC authentication lookup.
+	RestartAgent(ctx context.Context, brokerID, hostEndpoint, agentID string) error
 
 	// DeleteAgent deletes an agent from a remote runtime host.
-	// hostID is used for HMAC authentication lookup.
-	DeleteAgent(ctx context.Context, hostID, hostEndpoint, agentID string, deleteFiles, removeBranch bool) error
+	// brokerID is used for HMAC authentication lookup.
+	DeleteAgent(ctx context.Context, brokerID, hostEndpoint, agentID string, deleteFiles, removeBranch bool) error
 
 	// MessageAgent sends a message to an agent on a remote runtime host.
-	// hostID is used for HMAC authentication lookup.
-	MessageAgent(ctx context.Context, hostID, hostEndpoint, agentID, message string, interrupt bool) error
+	// brokerID is used for HMAC authentication lookup.
+	MessageAgent(ctx context.Context, brokerID, hostEndpoint, agentID, message string, interrupt bool) error
 }
 
 // RemoteCreateAgentRequest is the request body for creating an agent on a remote runtime host.
@@ -214,7 +214,7 @@ type Server struct {
 	apiKeyService     *APIKeyService      // API key service
 	oauthService      *OAuthService       // OAuth service for CLI authentication
 	authConfig        AuthConfig          // Unified auth configuration
-	hostAuthService   *HostAuthService    // Host HMAC authentication service
+	brokerAuthService   *BrokerAuthService    // Host HMAC authentication service
 	auditLogger       AuditLogger         // Audit logger for security events
 	metrics           MetricsRecorder     // Metrics recorder for host auth
 	controlChannel    *ControlChannelManager // WebSocket control channel for runtime hosts
@@ -278,8 +278,8 @@ func New(cfg ServerConfig, s store.Store) *Server {
 	}
 
 	// Initialize host auth service if enabled
-	if cfg.HostAuthConfig.Enabled {
-		srv.hostAuthService = NewHostAuthService(cfg.HostAuthConfig, s)
+	if cfg.BrokerAuthConfig.Enabled {
+		srv.brokerAuthService = NewBrokerAuthService(cfg.BrokerAuthConfig, s)
 		srv.auditLogger = NewLogAuditLogger("[Hub Audit]", cfg.Debug)
 		srv.metrics = NewHostAuthMetrics()
 		slog.Info("Host HMAC authentication enabled")
@@ -407,11 +407,11 @@ func (s *Server) GetAPIKeyService() *APIKeyService {
 	return s.apiKeyService
 }
 
-// GetHostAuthService returns the host authentication service.
-func (s *Server) GetHostAuthService() *HostAuthService {
+// GetBrokerAuthService returns the host authentication service.
+func (s *Server) GetBrokerAuthService() *BrokerAuthService {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.hostAuthService
+	return s.brokerAuthService
 }
 
 // GetAuditLogger returns the audit logger.
@@ -458,7 +458,7 @@ func (s *Server) CreateAuthenticatedDispatcher() *HTTPAgentDispatcher {
 	httpClient := NewAuthenticatedHostClient(s.store, s.config.Debug)
 
 	// Wrap with hybrid client that prefers control channel
-	var client RuntimeHostClient
+	var client RuntimeBrokerClient
 	if s.controlChannel != nil {
 		client = NewHybridHostClient(s.controlChannel, httpClient, s.config.Debug)
 	} else {
@@ -618,9 +618,9 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/api/v1/policies/", s.handlePolicyRoutes)
 
 	// Host registration endpoints (Runtime Host HMAC authentication)
-	s.mux.HandleFunc("/api/v1/hosts", s.handleHostsEndpoint)
-	s.mux.HandleFunc("/api/v1/hosts/join", s.handleHostJoin)
-	s.mux.HandleFunc("/api/v1/hosts/", s.handleHostByIDRoutes)
+	s.mux.HandleFunc("/api/v1/hosts", s.handleBrokersEndpoint)
+	s.mux.HandleFunc("/api/v1/hosts/join", s.handleBrokerJoin)
+	s.mux.HandleFunc("/api/v1/hosts/", s.handleBrokerByIDRoutes)
 
 	// WebSocket control channel endpoint for Runtime Hosts
 	s.mux.HandleFunc("/api/v1/runtime-hosts/connect", s.handleRuntimeHostConnect)
@@ -632,13 +632,13 @@ func (s *Server) applyMiddleware(h http.Handler) http.Handler {
 	h = s.recoveryMiddleware(h)
 	h = s.loggingMiddleware(h)
 
-	// Apply host auth middleware (checks X-Scion-Host-ID header for HMAC auth)
+	// Apply host auth middleware (checks X-Scion-Broker-ID header for HMAC auth)
 	// This runs after unified auth but before the handler, allowing hosts to authenticate
-	if s.hostAuthService != nil {
+	if s.brokerAuthService != nil {
 		if s.auditLogger != nil {
-			h = AuditableHostAuthMiddleware(s.hostAuthService, s.auditLogger)(h)
+			h = AuditableBrokerAuthMiddleware(s.brokerAuthService, s.auditLogger)(h)
 		} else {
-			h = HostAuthMiddleware(s.hostAuthService)(h)
+			h = BrokerAuthMiddleware(s.brokerAuthService)(h)
 		}
 	}
 
@@ -850,41 +850,41 @@ func (s *Server) handleRuntimeHostConnect(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Get host identity from context (set by HostAuthMiddleware)
-	host := GetHostIdentityFromContext(r.Context())
-	if host == nil {
+	// Get host identity from context (set by BrokerAuthMiddleware)
+	broker := GetBrokerIdentityFromContext(r.Context())
+	if broker == nil {
 		// Try to get host ID from header if not authenticated yet
-		hostID := r.Header.Get("X-Scion-Host-ID")
-		if hostID == "" {
+		brokerID := r.Header.Get("X-Scion-Broker-ID")
+		if brokerID == "" {
 			writeError(w, 401, ErrCodeUnauthorized, "Host authentication required", nil)
 			return
 		}
 
 		// Validate host exists and is authorized
-		if s.hostAuthService == nil {
+		if s.brokerAuthService == nil {
 			writeError(w, 401, ErrCodeUnauthorized, "Host authentication not enabled", nil)
 			return
 		}
 
 		// For WebSocket, we need to verify HMAC on the upgrade request
-		_, err := s.hostAuthService.ValidateHostSignature(r.Context(), r)
+		_, err := s.brokerAuthService.ValidateHostSignature(r.Context(), r)
 		if err != nil {
-			slog.Error("HMAC validation failed for host", "hostID", hostID, "error", err)
+			slog.Error("HMAC validation failed for host", "brokerID", brokerID, "error", err)
 			writeError(w, 401, ErrCodeHostAuthFailed, "Invalid host signature", nil)
 			return
 		}
 
 		// Use the host ID from header
-		if err := s.controlChannel.HandleUpgrade(w, r, hostID); err != nil {
-			slog.Error("Upgrade failed for host", "hostID", hostID, "error", err)
+		if err := s.controlChannel.HandleUpgrade(w, r, brokerID); err != nil {
+			slog.Error("Upgrade failed for host", "brokerID", brokerID, "error", err)
 			// Error already written by upgrader
 		}
 		return
 	}
 
 	// Use authenticated host identity
-	if err := s.controlChannel.HandleUpgrade(w, r, host.ID()); err != nil {
-		slog.Error("Upgrade failed for host", "hostID", host.ID(), "error", err)
+	if err := s.controlChannel.HandleUpgrade(w, r, broker.ID()); err != nil {
+		slog.Error("Upgrade failed for host", "brokerID", broker.ID(), "error", err)
 		// Error already written by upgrader
 	}
 }

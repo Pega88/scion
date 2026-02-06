@@ -16,25 +16,25 @@ import (
 	"github.com/ptone/scion-agent/pkg/store"
 )
 
-// HTTPRuntimeHostClient is an HTTP-based implementation of RuntimeHostClient.
+// HTTPRuntimeBrokerClient is an HTTP-based implementation of RuntimeBrokerClient.
 // It communicates with remote runtime hosts via their REST API.
-type HTTPRuntimeHostClient struct {
+type HTTPRuntimeBrokerClient struct {
 	client *http.Client
 	debug  bool
 }
 
-// NewHTTPRuntimeHostClient creates a new HTTP runtime host client.
-func NewHTTPRuntimeHostClient() *HTTPRuntimeHostClient {
-	return &HTTPRuntimeHostClient{
+// NewHTTPRuntimeBrokerClient creates a new HTTP runtime host client.
+func NewHTTPRuntimeBrokerClient() *HTTPRuntimeBrokerClient {
+	return &HTTPRuntimeBrokerClient{
 		client: &http.Client{
 			Timeout: 120 * time.Second, // Agent creation can take a while
 		},
 	}
 }
 
-// NewHTTPRuntimeHostClientWithDebug creates a new HTTP runtime host client with debug logging.
-func NewHTTPRuntimeHostClientWithDebug(debug bool) *HTTPRuntimeHostClient {
-	return &HTTPRuntimeHostClient{
+// NewHTTPRuntimeBrokerClientWithDebug creates a new HTTP runtime host client with debug logging.
+func NewHTTPRuntimeBrokerClientWithDebug(debug bool) *HTTPRuntimeBrokerClient {
+	return &HTTPRuntimeBrokerClient{
 		client: &http.Client{
 			Timeout: 120 * time.Second,
 		},
@@ -43,10 +43,10 @@ func NewHTTPRuntimeHostClientWithDebug(debug bool) *HTTPRuntimeHostClient {
 }
 
 // CreateAgent creates an agent on a remote runtime host.
-// Note: hostID is unused in this unauthenticated client but is part of the
-// RuntimeHostClient interface for compatibility with AuthenticatedHostClient.
-func (c *HTTPRuntimeHostClient) CreateAgent(ctx context.Context, hostID, hostEndpoint string, req *RemoteCreateAgentRequest) (*RemoteAgentResponse, error) {
-	_ = hostID // Unused in unauthenticated client
+// Note: brokerID is unused in this unauthenticated client but is part of the
+// RuntimeBrokerClient interface for compatibility with AuthenticatedHostClient.
+func (c *HTTPRuntimeBrokerClient) CreateAgent(ctx context.Context, brokerID, hostEndpoint string, req *RemoteCreateAgentRequest) (*RemoteAgentResponse, error) {
+	_ = brokerID // Unused in unauthenticated client
 	endpoint := fmt.Sprintf("%s/api/v1/agents", strings.TrimSuffix(hostEndpoint, "/"))
 
 	body, err := json.Marshal(req)
@@ -84,9 +84,9 @@ func (c *HTTPRuntimeHostClient) CreateAgent(ctx context.Context, hostID, hostEnd
 }
 
 // StartAgent starts an agent on a remote runtime host.
-// Note: hostID is unused in this unauthenticated client.
-func (c *HTTPRuntimeHostClient) StartAgent(ctx context.Context, hostID, hostEndpoint, agentID string) error {
-	_ = hostID // Unused in unauthenticated client
+// Note: brokerID is unused in this unauthenticated client.
+func (c *HTTPRuntimeBrokerClient) StartAgent(ctx context.Context, brokerID, hostEndpoint, agentID string) error {
+	_ = brokerID // Unused in unauthenticated client
 	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/start", strings.TrimSuffix(hostEndpoint, "/"), url.PathEscape(agentID))
 
 	if c.debug {
@@ -113,9 +113,9 @@ func (c *HTTPRuntimeHostClient) StartAgent(ctx context.Context, hostID, hostEndp
 }
 
 // StopAgent stops an agent on a remote runtime host.
-// Note: hostID is unused in this unauthenticated client.
-func (c *HTTPRuntimeHostClient) StopAgent(ctx context.Context, hostID, hostEndpoint, agentID string) error {
-	_ = hostID // Unused in unauthenticated client
+// Note: brokerID is unused in this unauthenticated client.
+func (c *HTTPRuntimeBrokerClient) StopAgent(ctx context.Context, brokerID, hostEndpoint, agentID string) error {
+	_ = brokerID // Unused in unauthenticated client
 	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/stop", strings.TrimSuffix(hostEndpoint, "/"), url.PathEscape(agentID))
 
 	if c.debug {
@@ -142,9 +142,9 @@ func (c *HTTPRuntimeHostClient) StopAgent(ctx context.Context, hostID, hostEndpo
 }
 
 // RestartAgent restarts an agent on a remote runtime host.
-// Note: hostID is unused in this unauthenticated client.
-func (c *HTTPRuntimeHostClient) RestartAgent(ctx context.Context, hostID, hostEndpoint, agentID string) error {
-	_ = hostID // Unused in unauthenticated client
+// Note: brokerID is unused in this unauthenticated client.
+func (c *HTTPRuntimeBrokerClient) RestartAgent(ctx context.Context, brokerID, hostEndpoint, agentID string) error {
+	_ = brokerID // Unused in unauthenticated client
 	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/restart", strings.TrimSuffix(hostEndpoint, "/"), url.PathEscape(agentID))
 
 	if c.debug {
@@ -171,9 +171,9 @@ func (c *HTTPRuntimeHostClient) RestartAgent(ctx context.Context, hostID, hostEn
 }
 
 // DeleteAgent deletes an agent from a remote runtime host.
-// Note: hostID is unused in this unauthenticated client.
-func (c *HTTPRuntimeHostClient) DeleteAgent(ctx context.Context, hostID, hostEndpoint, agentID string, deleteFiles, removeBranch bool) error {
-	_ = hostID // Unused in unauthenticated client
+// Note: brokerID is unused in this unauthenticated client.
+func (c *HTTPRuntimeBrokerClient) DeleteAgent(ctx context.Context, brokerID, hostEndpoint, agentID string, deleteFiles, removeBranch bool) error {
+	_ = brokerID // Unused in unauthenticated client
 	endpoint := fmt.Sprintf("%s/api/v1/agents/%s?deleteFiles=%t&removeBranch=%t",
 		strings.TrimSuffix(hostEndpoint, "/"), url.PathEscape(agentID), deleteFiles, removeBranch)
 
@@ -201,9 +201,9 @@ func (c *HTTPRuntimeHostClient) DeleteAgent(ctx context.Context, hostID, hostEnd
 }
 
 // MessageAgent sends a message to an agent on a remote runtime host.
-// Note: hostID is unused in this unauthenticated client.
-func (c *HTTPRuntimeHostClient) MessageAgent(ctx context.Context, hostID, hostEndpoint, agentID, message string, interrupt bool) error {
-	_ = hostID // Unused in unauthenticated client
+// Note: brokerID is unused in this unauthenticated client.
+func (c *HTTPRuntimeBrokerClient) MessageAgent(ctx context.Context, brokerID, hostEndpoint, agentID, message string, interrupt bool) error {
+	_ = brokerID // Unused in unauthenticated client
 	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/message", strings.TrimSuffix(hostEndpoint, "/"), url.PathEscape(agentID))
 
 	body, err := json.Marshal(map[string]interface{}{
@@ -244,11 +244,11 @@ type AgentTokenGenerator interface {
 }
 
 // HTTPAgentDispatcher dispatches agent operations to remote runtime hosts via HTTP.
-// It looks up the runtime host endpoint from the store and uses HTTPRuntimeHostClient
+// It looks up the runtime host endpoint from the store and uses HTTPRuntimeBrokerClient
 // to make the actual API calls.
 type HTTPAgentDispatcher struct {
 	store          store.Store
-	client         RuntimeHostClient
+	client         RuntimeBrokerClient
 	tokenGenerator AgentTokenGenerator
 	hubEndpoint    string // Hub endpoint URL for agents to call back
 	debug          bool
@@ -258,13 +258,13 @@ type HTTPAgentDispatcher struct {
 func NewHTTPAgentDispatcher(s store.Store, debug bool) *HTTPAgentDispatcher {
 	return &HTTPAgentDispatcher{
 		store:  s,
-		client: NewHTTPRuntimeHostClientWithDebug(debug),
+		client: NewHTTPRuntimeBrokerClientWithDebug(debug),
 		debug:  debug,
 	}
 }
 
 // NewHTTPAgentDispatcherWithClient creates a new HTTP-based agent dispatcher with a custom client.
-func NewHTTPAgentDispatcherWithClient(s store.Store, client RuntimeHostClient, debug bool) *HTTPAgentDispatcher {
+func NewHTTPAgentDispatcherWithClient(s store.Store, client RuntimeBrokerClient, debug bool) *HTTPAgentDispatcher {
 	return &HTTPAgentDispatcher{
 		store:  s,
 		client: client,
@@ -283,36 +283,36 @@ func (d *HTTPAgentDispatcher) SetHubEndpoint(endpoint string) {
 }
 
 // getHostEndpoint retrieves the endpoint URL for a runtime host.
-func (d *HTTPAgentDispatcher) getHostEndpoint(ctx context.Context, hostID string) (string, error) {
-	host, err := d.store.GetRuntimeHost(ctx, hostID)
+func (d *HTTPAgentDispatcher) getHostEndpoint(ctx context.Context, brokerID string) (string, error) {
+	broker, err := d.store.GetRuntimeBroker(ctx, brokerID)
 	if err != nil {
 		return "", fmt.Errorf("failed to get runtime host: %w", err)
 	}
 
-	if host.Endpoint == "" {
+	if broker.Endpoint == "" {
 		// Fall back to constructing endpoint from host info
 		// This assumes the host is reachable at its default port
 		return fmt.Sprintf("http://localhost:9800"), nil
 	}
 
-	return host.Endpoint, nil
+	return broker.Endpoint, nil
 }
 
 // DispatchAgentCreate creates an agent on the runtime host.
 func (d *HTTPAgentDispatcher) DispatchAgentCreate(ctx context.Context, agent *store.Agent) error {
-	if agent.RuntimeHostID == "" {
+	if agent.RuntimeBrokerID == "" {
 		return fmt.Errorf("agent has no runtime host assigned")
 	}
 
-	endpoint, err := d.getHostEndpoint(ctx, agent.RuntimeHostID)
+	endpoint, err := d.getHostEndpoint(ctx, agent.RuntimeBrokerID)
 	if err != nil {
 		return err
 	}
 
 	// Look up the local path for this grove on the target runtime host
 	var grovePath string
-	if agent.GroveID != "" && agent.RuntimeHostID != "" {
-		contrib, err := d.store.GetGroveContributor(ctx, agent.GroveID, agent.RuntimeHostID)
+	if agent.GroveID != "" && agent.RuntimeBrokerID != "" {
+		contrib, err := d.store.GetGroveContributor(ctx, agent.GroveID, agent.RuntimeBrokerID)
 		if err != nil {
 			if d.debug {
 				slog.Warn("Failed to get grove contributor for path lookup", "error", err)
@@ -320,7 +320,7 @@ func (d *HTTPAgentDispatcher) DispatchAgentCreate(ctx context.Context, agent *st
 		} else if contrib.LocalPath != "" {
 			grovePath = contrib.LocalPath
 			if d.debug {
-				slog.Debug("Found grove path for host", "hostID", agent.RuntimeHostID, "path", grovePath)
+				slog.Debug("Found grove path for host", "brokerID", agent.RuntimeBrokerID, "path", grovePath)
 			}
 		}
 	}
@@ -373,7 +373,7 @@ func (d *HTTPAgentDispatcher) DispatchAgentCreate(ctx context.Context, agent *st
 		req.ResolvedEnv = agent.AppliedConfig.Env
 	}
 
-	resp, err := d.client.CreateAgent(ctx, agent.RuntimeHostID, endpoint, req)
+	resp, err := d.client.CreateAgent(ctx, agent.RuntimeBrokerID, endpoint, req)
 	if err != nil {
 		return err
 	}
@@ -392,71 +392,71 @@ func (d *HTTPAgentDispatcher) DispatchAgentCreate(ctx context.Context, agent *st
 
 // DispatchAgentStart starts an agent on the runtime host.
 func (d *HTTPAgentDispatcher) DispatchAgentStart(ctx context.Context, agent *store.Agent) error {
-	if agent.RuntimeHostID == "" {
+	if agent.RuntimeBrokerID == "" {
 		return fmt.Errorf("agent has no runtime host assigned")
 	}
 
-	endpoint, err := d.getHostEndpoint(ctx, agent.RuntimeHostID)
+	endpoint, err := d.getHostEndpoint(ctx, agent.RuntimeBrokerID)
 	if err != nil {
 		return err
 	}
 
 	// Use agent name as identifier (runtime host uses name or ID)
-	return d.client.StartAgent(ctx, agent.RuntimeHostID, endpoint, agent.Name)
+	return d.client.StartAgent(ctx, agent.RuntimeBrokerID, endpoint, agent.Name)
 }
 
 // DispatchAgentStop stops an agent on the runtime host.
 func (d *HTTPAgentDispatcher) DispatchAgentStop(ctx context.Context, agent *store.Agent) error {
-	if agent.RuntimeHostID == "" {
+	if agent.RuntimeBrokerID == "" {
 		return fmt.Errorf("agent has no runtime host assigned")
 	}
 
-	endpoint, err := d.getHostEndpoint(ctx, agent.RuntimeHostID)
+	endpoint, err := d.getHostEndpoint(ctx, agent.RuntimeBrokerID)
 	if err != nil {
 		return err
 	}
 
-	return d.client.StopAgent(ctx, agent.RuntimeHostID, endpoint, agent.Name)
+	return d.client.StopAgent(ctx, agent.RuntimeBrokerID, endpoint, agent.Name)
 }
 
 // DispatchAgentRestart restarts an agent on the runtime host.
 func (d *HTTPAgentDispatcher) DispatchAgentRestart(ctx context.Context, agent *store.Agent) error {
-	if agent.RuntimeHostID == "" {
+	if agent.RuntimeBrokerID == "" {
 		return fmt.Errorf("agent has no runtime host assigned")
 	}
 
-	endpoint, err := d.getHostEndpoint(ctx, agent.RuntimeHostID)
+	endpoint, err := d.getHostEndpoint(ctx, agent.RuntimeBrokerID)
 	if err != nil {
 		return err
 	}
 
-	return d.client.RestartAgent(ctx, agent.RuntimeHostID, endpoint, agent.Name)
+	return d.client.RestartAgent(ctx, agent.RuntimeBrokerID, endpoint, agent.Name)
 }
 
 // DispatchAgentDelete deletes an agent from the runtime host.
 func (d *HTTPAgentDispatcher) DispatchAgentDelete(ctx context.Context, agent *store.Agent, deleteFiles, removeBranch bool) error {
-	if agent.RuntimeHostID == "" {
+	if agent.RuntimeBrokerID == "" {
 		return fmt.Errorf("agent has no runtime host assigned")
 	}
 
-	endpoint, err := d.getHostEndpoint(ctx, agent.RuntimeHostID)
+	endpoint, err := d.getHostEndpoint(ctx, agent.RuntimeBrokerID)
 	if err != nil {
 		return err
 	}
 
-	return d.client.DeleteAgent(ctx, agent.RuntimeHostID, endpoint, agent.Name, deleteFiles, removeBranch)
+	return d.client.DeleteAgent(ctx, agent.RuntimeBrokerID, endpoint, agent.Name, deleteFiles, removeBranch)
 }
 
 // DispatchAgentMessage sends a message to an agent on the runtime host.
 func (d *HTTPAgentDispatcher) DispatchAgentMessage(ctx context.Context, agent *store.Agent, message string, interrupt bool) error {
-	if agent.RuntimeHostID == "" {
+	if agent.RuntimeBrokerID == "" {
 		return fmt.Errorf("agent has no runtime host assigned")
 	}
 
-	endpoint, err := d.getHostEndpoint(ctx, agent.RuntimeHostID)
+	endpoint, err := d.getHostEndpoint(ctx, agent.RuntimeBrokerID)
 	if err != nil {
 		return err
 	}
 
-	return d.client.MessageAgent(ctx, agent.RuntimeHostID, endpoint, agent.Name, message, interrupt)
+	return d.client.MessageAgent(ctx, agent.RuntimeBrokerID, endpoint, agent.Name, message, interrupt)
 }

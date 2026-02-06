@@ -31,8 +31,8 @@ type Store interface {
 	// Grove operations
 	GroveStore
 
-	// RuntimeHost operations
-	RuntimeHostStore
+	// RuntimeBroker operations
+	RuntimeBrokerStore
 
 	// Template operations
 	TemplateStore
@@ -59,7 +59,7 @@ type Store interface {
 	APIKeyStore
 
 	// Host Secret operations (Runtime Host authentication)
-	HostSecretStore
+	BrokerSecretStore
 }
 
 // AgentStore defines agent-related persistence operations.
@@ -97,7 +97,7 @@ type AgentStore interface {
 // AgentFilter defines criteria for filtering agents.
 type AgentFilter struct {
 	GroveID       string
-	RuntimeHostID string
+	RuntimeBrokerID string
 	Status        string
 	OwnerID       string
 }
@@ -154,41 +154,41 @@ type GroveFilter struct {
 	OwnerID         string
 	Visibility      string
 	GitRemotePrefix string
-	HostID          string // Filter by contributing host
+	BrokerID string // Filter by contributing host
 	Name            string // Filter by exact name (case-insensitive)
 }
 
-// RuntimeHostStore defines runtime host persistence operations.
-type RuntimeHostStore interface {
-	// CreateRuntimeHost creates a new runtime host record.
-	CreateRuntimeHost(ctx context.Context, host *RuntimeHost) error
+// RuntimeBrokerStore defines runtime host persistence operations.
+type RuntimeBrokerStore interface {
+	// CreateRuntimeBroker creates a new runtime host record.
+	CreateRuntimeBroker(ctx context.Context, broker *RuntimeBroker) error
 
-	// GetRuntimeHost retrieves a runtime host by ID.
+	// GetRuntimeBroker retrieves a runtime host by ID.
 	// Returns ErrNotFound if the host doesn't exist.
-	GetRuntimeHost(ctx context.Context, id string) (*RuntimeHost, error)
+	GetRuntimeBroker(ctx context.Context, id string) (*RuntimeBroker, error)
 
-	// GetRuntimeHostByName retrieves a runtime host by its name (case-insensitive).
+	// GetRuntimeBrokerByName retrieves a runtime host by its name (case-insensitive).
 	// This is used to prevent duplicate hosts with the same name.
 	// Returns ErrNotFound if the host doesn't exist.
-	GetRuntimeHostByName(ctx context.Context, name string) (*RuntimeHost, error)
+	GetRuntimeBrokerByName(ctx context.Context, name string) (*RuntimeBroker, error)
 
-	// UpdateRuntimeHost updates an existing runtime host.
+	// UpdateRuntimeBroker updates an existing runtime host.
 	// Returns ErrNotFound if the host doesn't exist.
-	UpdateRuntimeHost(ctx context.Context, host *RuntimeHost) error
+	UpdateRuntimeBroker(ctx context.Context, broker *RuntimeBroker) error
 
-	// DeleteRuntimeHost removes a runtime host by ID.
+	// DeleteRuntimeBroker removes a runtime host by ID.
 	// Returns ErrNotFound if the host doesn't exist.
-	DeleteRuntimeHost(ctx context.Context, id string) error
+	DeleteRuntimeBroker(ctx context.Context, id string) error
 
-	// ListRuntimeHosts returns runtime hosts matching the filter criteria.
-	ListRuntimeHosts(ctx context.Context, filter RuntimeHostFilter, opts ListOptions) (*ListResult[RuntimeHost], error)
+	// ListRuntimeBrokers returns runtime hosts matching the filter criteria.
+	ListRuntimeBrokers(ctx context.Context, filter RuntimeBrokerFilter, opts ListOptions) (*ListResult[RuntimeBroker], error)
 
-	// UpdateRuntimeHostHeartbeat updates the last heartbeat and status.
-	UpdateRuntimeHostHeartbeat(ctx context.Context, id string, status string) error
+	// UpdateRuntimeBrokerHeartbeat updates the last heartbeat and status.
+	UpdateRuntimeBrokerHeartbeat(ctx context.Context, id string, status string) error
 }
 
-// RuntimeHostFilter defines criteria for filtering runtime hosts.
-type RuntimeHostFilter struct {
+// RuntimeBrokerFilter defines criteria for filtering runtime hosts.
+type RuntimeBrokerFilter struct {
 	Status  string
 	Mode    string
 	GroveID string
@@ -268,20 +268,20 @@ type GroveContributorStore interface {
 	AddGroveContributor(ctx context.Context, contrib *GroveContributor) error
 
 	// RemoveGroveContributor removes a host from a grove's contributors.
-	RemoveGroveContributor(ctx context.Context, groveID, hostID string) error
+	RemoveGroveContributor(ctx context.Context, groveID, brokerID string) error
 
 	// GetGroveContributor returns a specific contributor by grove and host ID.
 	// Returns ErrNotFound if the contributor relationship doesn't exist.
-	GetGroveContributor(ctx context.Context, groveID, hostID string) (*GroveContributor, error)
+	GetGroveContributor(ctx context.Context, groveID, brokerID string) (*GroveContributor, error)
 
 	// GetGroveContributors returns all contributors to a grove.
 	GetGroveContributors(ctx context.Context, groveID string) ([]GroveContributor, error)
 
 	// GetHostGroves returns all groves a host contributes to.
-	GetHostGroves(ctx context.Context, hostID string) ([]GroveContributor, error)
+	GetHostGroves(ctx context.Context, brokerID string) ([]GroveContributor, error)
 
 	// UpdateContributorStatus updates a contributor's status and last seen time.
-	UpdateContributorStatus(ctx context.Context, groveID, hostID, status string) error
+	UpdateContributorStatus(ctx context.Context, groveID, brokerID, status string) error
 }
 
 // EnvVarStore defines environment variable persistence operations.
@@ -509,44 +509,44 @@ type APIKeyStore interface {
 // Host Secrets (Runtime Host Authentication)
 // =============================================================================
 
-// HostSecretStore defines host secret persistence operations.
-type HostSecretStore interface {
-	// CreateHostSecret creates a new host secret record.
+// BrokerSecretStore defines host secret persistence operations.
+type BrokerSecretStore interface {
+	// CreateBrokerSecret creates a new host secret record.
 	// Returns ErrAlreadyExists if a secret for this host already exists.
-	CreateHostSecret(ctx context.Context, secret *HostSecret) error
+	CreateBrokerSecret(ctx context.Context, secret *BrokerSecret) error
 
-	// GetHostSecret retrieves a host secret by host ID.
+	// GetBrokerSecret retrieves a host secret by host ID.
 	// Returns ErrNotFound if the secret doesn't exist.
-	GetHostSecret(ctx context.Context, hostID string) (*HostSecret, error)
+	GetBrokerSecret(ctx context.Context, brokerID string) (*BrokerSecret, error)
 
 	// GetActiveSecrets retrieves all active and deprecated (within grace period) secrets for a host.
 	// This is used during secret rotation to support dual-secret validation.
 	// Returns an empty slice if no secrets exist.
-	GetActiveSecrets(ctx context.Context, hostID string) ([]*HostSecret, error)
+	GetActiveSecrets(ctx context.Context, brokerID string) ([]*BrokerSecret, error)
 
-	// UpdateHostSecret updates an existing host secret.
+	// UpdateBrokerSecret updates an existing host secret.
 	// Returns ErrNotFound if the secret doesn't exist.
-	UpdateHostSecret(ctx context.Context, secret *HostSecret) error
+	UpdateBrokerSecret(ctx context.Context, secret *BrokerSecret) error
 
-	// DeleteHostSecret removes a host secret.
+	// DeleteBrokerSecret removes a host secret.
 	// Returns ErrNotFound if the secret doesn't exist.
-	DeleteHostSecret(ctx context.Context, hostID string) error
+	DeleteBrokerSecret(ctx context.Context, brokerID string) error
 
 	// CreateJoinToken creates a new join token for host registration.
 	// Returns ErrAlreadyExists if a token for this host already exists.
-	CreateJoinToken(ctx context.Context, token *HostJoinToken) error
+	CreateJoinToken(ctx context.Context, token *BrokerJoinToken) error
 
 	// GetJoinToken retrieves a join token by token hash.
 	// Returns ErrNotFound if the token doesn't exist.
-	GetJoinToken(ctx context.Context, tokenHash string) (*HostJoinToken, error)
+	GetJoinToken(ctx context.Context, tokenHash string) (*BrokerJoinToken, error)
 
-	// GetJoinTokenByHostID retrieves a join token by host ID.
+	// GetJoinTokenByBrokerID retrieves a join token by host ID.
 	// Returns ErrNotFound if the token doesn't exist.
-	GetJoinTokenByHostID(ctx context.Context, hostID string) (*HostJoinToken, error)
+	GetJoinTokenByBrokerID(ctx context.Context, brokerID string) (*BrokerJoinToken, error)
 
 	// DeleteJoinToken removes a join token by host ID.
 	// Returns ErrNotFound if the token doesn't exist.
-	DeleteJoinToken(ctx context.Context, hostID string) error
+	DeleteJoinToken(ctx context.Context, brokerID string) error
 
 	// CleanExpiredJoinTokens removes all expired join tokens.
 	CleanExpiredJoinTokens(ctx context.Context) error

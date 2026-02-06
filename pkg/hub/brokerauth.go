@@ -21,8 +21,8 @@ import (
 	"github.com/ptone/scion-agent/pkg/store"
 )
 
-// HostAuthConfig holds host authentication configuration.
-type HostAuthConfig struct {
+// BrokerAuthConfig holds host authentication configuration.
+type BrokerAuthConfig struct {
 	// Enabled controls whether host authentication is active.
 	Enabled bool
 	// MaxClockSkew is the maximum allowed time difference between client and server.
@@ -39,9 +39,9 @@ type HostAuthConfig struct {
 	SecretKeyLength int
 }
 
-// DefaultHostAuthConfig returns the default host authentication configuration.
-func DefaultHostAuthConfig() HostAuthConfig {
-	return HostAuthConfig{
+// DefaultBrokerAuthConfig returns the default host authentication configuration.
+func DefaultBrokerAuthConfig() BrokerAuthConfig {
+	return BrokerAuthConfig{
 		Enabled:          true,
 		MaxClockSkew:     5 * time.Minute,
 		EnableNonceCache: true, // Enabled by default for replay attack prevention
@@ -52,9 +52,9 @@ func DefaultHostAuthConfig() HostAuthConfig {
 	}
 }
 
-// HostAuthService handles host registration and HMAC-based authentication.
-type HostAuthService struct {
-	config HostAuthConfig
+// BrokerAuthService handles host registration and HMAC-based authentication.
+type BrokerAuthService struct {
+	config BrokerAuthConfig
 	store  store.Store
 	nonces *NonceCache
 }
@@ -104,9 +104,9 @@ func (nc *NonceCache) cleanup() {
 	}
 }
 
-// NewHostAuthService creates a new host authentication service.
-func NewHostAuthService(config HostAuthConfig, s store.Store) *HostAuthService {
-	svc := &HostAuthService{
+// NewBrokerAuthService creates a new host authentication service.
+func NewBrokerAuthService(config BrokerAuthConfig, s store.Store) *BrokerAuthService {
+	svc := &BrokerAuthService{
 		config: config,
 		store:  s,
 	}
@@ -129,14 +129,14 @@ type CreateHostRegistrationRequest struct {
 
 // CreateHostRegistrationResponse is the response for POST /api/v1/hosts.
 type CreateHostRegistrationResponse struct {
-	HostID    string    `json:"hostId"`
+	BrokerID string    `json:"hostId"`
 	JoinToken string    `json:"joinToken"` // scion_join_<base64>
 	ExpiresAt time.Time `json:"expiresAt"`
 }
 
 // HostJoinRequest is the request body for POST /api/v1/hosts/join.
 type HostJoinRequest struct {
-	HostID       string   `json:"hostId"`
+	BrokerID string   `json:"hostId"`
 	JoinToken    string   `json:"joinToken"`
 	Hostname     string   `json:"hostname"`
 	Version      string   `json:"version"`
@@ -147,7 +147,7 @@ type HostJoinRequest struct {
 type HostJoinResponse struct {
 	SecretKey   string `json:"secretKey"` // Base64-encoded 256-bit key
 	HubEndpoint string `json:"hubEndpoint"`
-	HostID      string `json:"hostId"`
+	BrokerID string `json:"hostId"`
 }
 
 // JoinTokenPrefix is the prefix for join tokens.
@@ -155,27 +155,27 @@ const JoinTokenPrefix = "scion_join_"
 
 // CreateHostRegistration creates a new host with a join token.
 // Requires admin authentication.
-func (s *HostAuthService) CreateHostRegistration(ctx context.Context, req CreateHostRegistrationRequest, createdBy string) (*CreateHostRegistrationResponse, error) {
+func (s *BrokerAuthService) CreateHostRegistration(ctx context.Context, req CreateHostRegistrationRequest, createdBy string) (*CreateHostRegistrationResponse, error) {
 	if req.Name == "" {
 		return nil, errors.New("name is required")
 	}
 
 	// Generate host ID
-	hostID := uuid.New().String()
+	brokerID := uuid.New().String()
 
 	// Create the runtime host record
-	host := &store.RuntimeHost{
-		ID:          hostID,
+	broker := &store.RuntimeBroker{
+		ID:          brokerID,
 		Name:        req.Name,
 		Slug:        slugify(req.Name),
-		Mode:        store.HostModeConnected,
-		Status:      store.HostStatusOffline,
+		Mode:        store.BrokerModeConnected,
+		Status:      store.BrokerStatusOffline,
 		Labels:      req.Labels,
 		Created:     time.Now(),
 		Updated:     time.Now(),
 	}
 
-	if err := s.store.CreateRuntimeHost(ctx, host); err != nil {
+	if err := s.store.CreateRuntimeBroker(ctx, broker); err != nil {
 		return nil, fmt.Errorf("failed to create runtime host: %w", err)
 	}
 
@@ -193,8 +193,8 @@ func (s *HostAuthService) CreateHostRegistration(ctx context.Context, req Create
 	expiresAt := time.Now().Add(s.config.JoinTokenExpiry)
 
 	// Store the join token
-	joinTokenRecord := &store.HostJoinToken{
-		HostID:    hostID,
+	joinTokenRecord := &store.BrokerJoinToken{
+		BrokerID:    brokerID,
 		TokenHash: tokenHash,
 		ExpiresAt: expiresAt,
 		CreatedAt: time.Now(),
@@ -203,12 +203,12 @@ func (s *HostAuthService) CreateHostRegistration(ctx context.Context, req Create
 
 	if err := s.store.CreateJoinToken(ctx, joinTokenRecord); err != nil {
 		// Clean up the host record on failure
-		_ = s.store.DeleteRuntimeHost(ctx, hostID)
+		_ = s.store.DeleteRuntimeBroker(ctx, brokerID)
 		return nil, fmt.Errorf("failed to create join token: %w", err)
 	}
 
 	return &CreateHostRegistrationResponse{
-		HostID:    hostID,
+		BrokerID:    brokerID,
 		JoinToken: joinToken,
 		ExpiresAt: expiresAt,
 	}, nil
@@ -216,8 +216,8 @@ func (s *HostAuthService) CreateHostRegistration(ctx context.Context, req Create
 
 // CompleteHostJoin completes host registration with join token exchange.
 // Returns the shared secret for HMAC authentication.
-func (s *HostAuthService) CompleteHostJoin(ctx context.Context, req HostJoinRequest, hubEndpoint string) (*HostJoinResponse, error) {
-	if req.HostID == "" {
+func (s *BrokerAuthService) CompleteHostJoin(ctx context.Context, req HostJoinRequest, hubEndpoint string) (*HostJoinResponse, error) {
+	if req.BrokerID == "" {
 		return nil, errors.New("hostId is required")
 	}
 	if req.JoinToken == "" {
@@ -237,14 +237,14 @@ func (s *HostAuthService) CompleteHostJoin(ctx context.Context, req HostJoinRequ
 	}
 
 	// Verify host ID matches
-	if joinToken.HostID != req.HostID {
+	if joinToken.BrokerID != req.BrokerID {
 		return nil, fmt.Errorf("join token does not match host")
 	}
 
 	// Check expiry
 	if time.Now().After(joinToken.ExpiresAt) {
 		// Delete expired token
-		_ = s.store.DeleteJoinToken(ctx, joinToken.HostID)
+		_ = s.store.DeleteJoinToken(ctx, joinToken.BrokerID)
 		return nil, fmt.Errorf("join token has expired")
 	}
 
@@ -255,54 +255,54 @@ func (s *HostAuthService) CompleteHostJoin(ctx context.Context, req HostJoinRequ
 	}
 
 	// Store the host secret
-	hostSecret := &store.HostSecret{
-		HostID:    req.HostID,
+	hostSecret := &store.BrokerSecret{
+		BrokerID:    req.BrokerID,
 		SecretKey: secretKey,
-		Algorithm: store.HostSecretAlgorithmHMACSHA256,
+		Algorithm: store.BrokerSecretAlgorithmHMACSHA256,
 		CreatedAt: time.Now(),
-		Status:    store.HostSecretStatusActive,
+		Status:    store.BrokerSecretStatusActive,
 	}
 
-	if err := s.store.CreateHostSecret(ctx, hostSecret); err != nil {
+	if err := s.store.CreateBrokerSecret(ctx, hostSecret); err != nil {
 		return nil, fmt.Errorf("failed to store host secret: %w", err)
 	}
 
 	// Update the runtime host with connection info
-	host, err := s.store.GetRuntimeHost(ctx, req.HostID)
+	broker, err := s.store.GetRuntimeBroker(ctx, req.BrokerID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get runtime host: %w", err)
 	}
 
-	host.Version = req.Version
-	host.Status = store.HostStatusOnline
-	host.ConnectionState = "connected"
-	host.LastHeartbeat = time.Now()
-	host.Updated = time.Now()
+	broker.Version = req.Version
+	broker.Status = store.BrokerStatusOnline
+	broker.ConnectionState = "connected"
+	broker.LastHeartbeat = time.Now()
+	broker.Updated = time.Now()
 
-	if err := s.store.UpdateRuntimeHost(ctx, host); err != nil {
+	if err := s.store.UpdateRuntimeBroker(ctx, broker); err != nil {
 		return nil, fmt.Errorf("failed to update runtime host: %w", err)
 	}
 
 	// Delete the used join token
-	_ = s.store.DeleteJoinToken(ctx, joinToken.HostID)
+	_ = s.store.DeleteJoinToken(ctx, joinToken.BrokerID)
 
 	return &HostJoinResponse{
 		SecretKey:   base64.StdEncoding.EncodeToString(secretKey),
 		HubEndpoint: hubEndpoint,
-		HostID:      req.HostID,
+		BrokerID:      req.BrokerID,
 	}, nil
 }
 
 // GenerateAndStoreSecret generates a new HMAC secret for an existing host.
 // This is used for simplified registration flows where a join token is not required.
 // Returns the base64-encoded secret key.
-func (s *HostAuthService) GenerateAndStoreSecret(ctx context.Context, hostID string) (string, error) {
-	if hostID == "" {
+func (s *BrokerAuthService) GenerateAndStoreSecret(ctx context.Context, brokerID string) (string, error) {
+	if brokerID == "" {
 		return "", errors.New("hostId is required")
 	}
 
 	// Check if host already has a secret
-	existingSecret, err := s.store.GetHostSecret(ctx, hostID)
+	existingSecret, err := s.store.GetBrokerSecret(ctx, brokerID)
 	if err == nil && existingSecret != nil {
 		// Host already has a secret - return it (re-registration case)
 		return base64.StdEncoding.EncodeToString(existingSecret.SecretKey), nil
@@ -315,15 +315,15 @@ func (s *HostAuthService) GenerateAndStoreSecret(ctx context.Context, hostID str
 	}
 
 	// Store the host secret
-	hostSecret := &store.HostSecret{
-		HostID:    hostID,
+	hostSecret := &store.BrokerSecret{
+		BrokerID:    brokerID,
 		SecretKey: secretKey,
-		Algorithm: store.HostSecretAlgorithmHMACSHA256,
+		Algorithm: store.BrokerSecretAlgorithmHMACSHA256,
 		CreatedAt: time.Now(),
-		Status:    store.HostSecretStatusActive,
+		Status:    store.BrokerSecretStatusActive,
 	}
 
-	if err := s.store.CreateHostSecret(ctx, hostSecret); err != nil {
+	if err := s.store.CreateBrokerSecret(ctx, hostSecret); err != nil {
 		return "", fmt.Errorf("failed to store host secret: %w", err)
 	}
 
@@ -336,7 +336,7 @@ func (s *HostAuthService) GenerateAndStoreSecret(ctx context.Context, hostID str
 
 // HMAC authentication headers as per runtime-host-auth.md
 const (
-	HeaderHostID        = "X-Scion-Host-ID"
+	HeaderBrokerID        = "X-Scion-Broker-ID"
 	HeaderTimestamp     = "X-Scion-Timestamp"
 	HeaderNonce         = "X-Scion-Nonce"
 	HeaderSignature     = "X-Scion-Signature"
@@ -344,11 +344,11 @@ const (
 )
 
 // ValidateHostSignature validates an HMAC-signed request from a Runtime Host.
-func (s *HostAuthService) ValidateHostSignature(ctx context.Context, r *http.Request) (HostIdentity, error) {
+func (s *BrokerAuthService) ValidateHostSignature(ctx context.Context, r *http.Request) (BrokerIdentity, error) {
 	// Extract required headers
-	hostID := r.Header.Get(HeaderHostID)
-	if hostID == "" {
-		return nil, errors.New("missing X-Scion-Host-ID header")
+	brokerID := r.Header.Get(HeaderBrokerID)
+	if brokerID == "" {
+		return nil, errors.New("missing X-Scion-Broker-ID header")
 	}
 
 	timestamp := r.Header.Get(HeaderTimestamp)
@@ -385,16 +385,16 @@ func (s *HostAuthService) ValidateHostSignature(ctx context.Context, r *http.Req
 	}
 
 	// Get the host's secret
-	hostSecret, err := s.store.GetHostSecret(ctx, hostID)
+	hostSecret, err := s.store.GetBrokerSecret(ctx, brokerID)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			return nil, fmt.Errorf("unknown host: %s", hostID)
+			return nil, fmt.Errorf("unknown host: %s", brokerID)
 		}
 		return nil, fmt.Errorf("failed to get host secret: %w", err)
 	}
 
 	// Check if secret is active
-	if hostSecret.Status != store.HostSecretStatusActive {
+	if hostSecret.Status != store.BrokerSecretStatusActive {
 		return nil, fmt.Errorf("host secret is %s", hostSecret.Status)
 	}
 
@@ -412,12 +412,12 @@ func (s *HostAuthService) ValidateHostSignature(ctx context.Context, r *http.Req
 		return nil, errors.New("invalid signature")
 	}
 
-	return NewHostIdentity(hostID), nil
+	return NewBrokerIdentity(brokerID), nil
 }
 
 // buildCanonicalString builds the canonical string for HMAC signing.
 // Format: METHOD\nPATH\nQUERY\nTIMESTAMP\nNONCE\nSIGNED_HEADERS\nBODY_HASH
-func (s *HostAuthService) buildCanonicalString(r *http.Request, timestamp, nonce string) []byte {
+func (s *BrokerAuthService) buildCanonicalString(r *http.Request, timestamp, nonce string) []byte {
 	var buf bytes.Buffer
 
 	// HTTP method
@@ -471,7 +471,7 @@ func (s *HostAuthService) buildCanonicalString(r *http.Request, timestamp, nonce
 
 // SignRequest signs an outgoing HTTP request with HMAC.
 // Used by Runtime Hosts when calling the Hub API.
-func (s *HostAuthService) SignRequest(r *http.Request, hostID string, secret []byte) error {
+func (s *BrokerAuthService) SignRequest(r *http.Request, brokerID string, secret []byte) error {
 	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
 
 	// Generate nonce
@@ -482,7 +482,7 @@ func (s *HostAuthService) SignRequest(r *http.Request, hostID string, secret []b
 	nonce := base64.URLEncoding.EncodeToString(nonceBytes)
 
 	// Set headers
-	r.Header.Set(HeaderHostID, hostID)
+	r.Header.Set(HeaderBrokerID, brokerID)
 	r.Header.Set(HeaderTimestamp, timestamp)
 	r.Header.Set(HeaderNonce, nonce)
 
@@ -514,17 +514,17 @@ type RotateSecretResponse struct {
 	GracePeriod string    `json:"gracePeriod"` // Duration string
 }
 
-// RotateHostSecret generates a new secret for a host.
+// RotateBrokerSecret generates a new secret for a host.
 // The old secret is marked as deprecated and remains valid for the grace period.
 // Note: Current schema only supports one secret per host, so this replaces immediately.
 // TODO: Add schema migration to support multiple secrets per host for true dual-secret rotation.
-func (s *HostAuthService) RotateHostSecret(ctx context.Context, hostID string, gracePeriod time.Duration) (*RotateSecretResponse, error) {
+func (s *BrokerAuthService) RotateBrokerSecret(ctx context.Context, brokerID string, gracePeriod time.Duration) (*RotateSecretResponse, error) {
 	if gracePeriod <= 0 {
 		gracePeriod = 5 * time.Minute
 	}
 
 	// Get existing secret
-	existingSecret, err := s.store.GetHostSecret(ctx, hostID)
+	existingSecret, err := s.store.GetBrokerSecret(ctx, brokerID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get existing secret: %w", err)
 	}
@@ -543,9 +543,9 @@ func (s *HostAuthService) RotateHostSecret(ctx context.Context, hostID string, g
 	// 2. Create new secret with status active
 	existingSecret.SecretKey = newSecretKey
 	existingSecret.RotatedAt = now
-	existingSecret.Status = store.HostSecretStatusActive
+	existingSecret.Status = store.BrokerSecretStatusActive
 
-	if err := s.store.UpdateHostSecret(ctx, existingSecret); err != nil {
+	if err := s.store.UpdateBrokerSecret(ctx, existingSecret); err != nil {
 		return nil, fmt.Errorf("failed to update secret: %w", err)
 	}
 
@@ -559,21 +559,21 @@ func (s *HostAuthService) RotateHostSecret(ctx context.Context, hostID string, g
 // ValidateHostSignatureWithRotation validates a request trying multiple secrets.
 // This supports the grace period during secret rotation where both old and new
 // secrets are valid.
-func (s *HostAuthService) ValidateHostSignatureWithRotation(ctx context.Context, r *http.Request) (HostIdentity, error) {
+func (s *BrokerAuthService) ValidateHostSignatureWithRotation(ctx context.Context, r *http.Request) (BrokerIdentity, error) {
 	// Extract required headers
-	hostID := r.Header.Get(HeaderHostID)
-	if hostID == "" {
-		return nil, errors.New("missing X-Scion-Host-ID header")
+	brokerID := r.Header.Get(HeaderBrokerID)
+	if brokerID == "" {
+		return nil, errors.New("missing X-Scion-Broker-ID header")
 	}
 
 	// Get all active secrets for this host
-	secrets, err := s.store.GetActiveSecrets(ctx, hostID)
+	secrets, err := s.store.GetActiveSecrets(ctx, brokerID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get host secrets: %w", err)
 	}
 
 	if len(secrets) == 0 {
-		return nil, fmt.Errorf("unknown host: %s", hostID)
+		return nil, fmt.Errorf("unknown host: %s", brokerID)
 	}
 
 	// Try each secret until one validates
@@ -584,7 +584,7 @@ func (s *HostAuthService) ValidateHostSignatureWithRotation(ctx context.Context,
 			continue
 		}
 
-		identity, err := s.validateWithSecret(ctx, r, hostID, secret.SecretKey)
+		identity, err := s.validateWithSecret(ctx, r, brokerID, secret.SecretKey)
 		if err == nil {
 			return identity, nil
 		}
@@ -598,7 +598,7 @@ func (s *HostAuthService) ValidateHostSignatureWithRotation(ctx context.Context,
 }
 
 // validateWithSecret validates a request using a specific secret key.
-func (s *HostAuthService) validateWithSecret(ctx context.Context, r *http.Request, hostID string, secretKey []byte) (HostIdentity, error) {
+func (s *BrokerAuthService) validateWithSecret(ctx context.Context, r *http.Request, brokerID string, secretKey []byte) (BrokerIdentity, error) {
 	timestamp := r.Header.Get(HeaderTimestamp)
 	if timestamp == "" {
 		return nil, errors.New("missing X-Scion-Timestamp header")
@@ -643,7 +643,7 @@ func (s *HostAuthService) validateWithSecret(ctx context.Context, r *http.Reques
 		}
 	}
 
-	return NewHostIdentity(hostID), nil
+	return NewBrokerIdentity(brokerID), nil
 }
 
 // =============================================================================
@@ -681,9 +681,9 @@ func slugify(name string) string {
 // Middleware
 // =============================================================================
 
-// HostAuthMiddleware creates middleware for HMAC-based host authentication.
-// This runs AFTER UnifiedAuthMiddleware and checks for X-Scion-Host-ID header.
-func HostAuthMiddleware(svc *HostAuthService) func(http.Handler) http.Handler {
+// BrokerAuthMiddleware creates middleware for HMAC-based host authentication.
+// This runs AFTER UnifiedAuthMiddleware and checks for X-Scion-Broker-ID header.
+func BrokerAuthMiddleware(svc *BrokerAuthService) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Skip if host auth service is not configured
@@ -693,8 +693,8 @@ func HostAuthMiddleware(svc *HostAuthService) func(http.Handler) http.Handler {
 			}
 
 			// Skip if not a host-authenticated request
-			hostID := r.Header.Get(HeaderHostID)
-			if hostID == "" {
+			brokerID := r.Header.Get(HeaderBrokerID)
+			if brokerID == "" {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -707,7 +707,7 @@ func HostAuthMiddleware(svc *HostAuthService) func(http.Handler) http.Handler {
 			}
 
 			// Set both host-specific and generic identity contexts
-			ctx := contextWithHostIdentity(r.Context(), identity)
+			ctx := contextWithBrokerIdentity(r.Context(), identity)
 			ctx = contextWithIdentity(ctx, identity)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})

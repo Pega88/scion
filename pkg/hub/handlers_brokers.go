@@ -7,21 +7,21 @@ import (
 	"time"
 )
 
-// handleHostsEndpoint handles POST /api/v1/hosts.
+// handleBrokersEndpoint handles POST /api/v1/hosts.
 // Creates a new host registration with join token.
 // Requires admin authentication.
-func (s *Server) handleHostsEndpoint(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleBrokersEndpoint(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		MethodNotAllowed(w)
 		return
 	}
-	s.createHostRegistration(w, r)
+	s.createBrokerRegistration(w, r)
 }
 
-// createHostRegistration creates a new host with join token.
-func (s *Server) createHostRegistration(w http.ResponseWriter, r *http.Request) {
+// createBrokerRegistration creates a new host with join token.
+func (s *Server) createBrokerRegistration(w http.ResponseWriter, r *http.Request) {
 	// Check if host auth service is available
-	if s.hostAuthService == nil {
+	if s.brokerAuthService == nil {
 		writeError(w, http.StatusServiceUnavailable, ErrCodeUnavailable,
 			"host authentication service not configured", nil)
 		return
@@ -53,7 +53,7 @@ func (s *Server) createHostRegistration(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Create the host registration
-	resp, err := s.hostAuthService.CreateHostRegistration(r.Context(), req, user.ID())
+	resp, err := s.brokerAuthService.CreateHostRegistration(r.Context(), req, user.ID())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, ErrCodeInternalError,
 			"failed to create host registration: "+err.Error(), nil)
@@ -61,22 +61,22 @@ func (s *Server) createHostRegistration(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Log audit event
-	LogRegistrationEvent(r.Context(), s.auditLogger, resp.HostID, req.Name, user.ID(), getClientIP(r))
+	LogRegistrationEvent(r.Context(), s.auditLogger, resp.BrokerID, req.Name, user.ID(), getClientIP(r))
 
 	writeJSON(w, http.StatusCreated, resp)
 }
 
-// handleHostJoin handles POST /api/v1/hosts/join.
+// handleBrokerJoin handles POST /api/v1/hosts/join.
 // Completes host registration with join token exchange.
 // This is an unauthenticated endpoint - the join token serves as authentication.
-func (s *Server) handleHostJoin(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleBrokerJoin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		MethodNotAllowed(w)
 		return
 	}
 
 	// Check if host auth service is available
-	if s.hostAuthService == nil {
+	if s.brokerAuthService == nil {
 		writeError(w, http.StatusServiceUnavailable, ErrCodeUnavailable,
 			"host authentication service not configured", nil)
 		return
@@ -90,7 +90,7 @@ func (s *Server) handleHostJoin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate required fields
-	if req.HostID == "" {
+	if req.BrokerID == "" {
 		ValidationError(w, "hostId is required", map[string]interface{}{
 			"field": "hostId",
 		})
@@ -115,10 +115,10 @@ func (s *Server) handleHostJoin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Complete the join
-	resp, err := s.hostAuthService.CompleteHostJoin(r.Context(), req, hubEndpoint)
+	resp, err := s.brokerAuthService.CompleteHostJoin(r.Context(), req, hubEndpoint)
 	if err != nil {
 		// Log failed join attempt
-		LogJoinEvent(r.Context(), s.auditLogger, req.HostID, getClientIP(r), false, err.Error())
+		LogJoinEvent(r.Context(), s.auditLogger, req.BrokerID, getClientIP(r), false, err.Error())
 
 		// Determine error type and return appropriate response
 		errMsg := err.Error()
@@ -135,13 +135,13 @@ func (s *Server) handleHostJoin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Log successful join
-	LogJoinEvent(r.Context(), s.auditLogger, req.HostID, getClientIP(r), true, "")
+	LogJoinEvent(r.Context(), s.auditLogger, req.BrokerID, getClientIP(r), true, "")
 
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// handleHostByIDRoutes handles routes under /api/v1/hosts/{id}/...
-func (s *Server) handleHostByIDRoutes(w http.ResponseWriter, r *http.Request) {
+// handleBrokerByIDRoutes handles routes under /api/v1/hosts/{id}/...
+func (s *Server) handleBrokerByIDRoutes(w http.ResponseWriter, r *http.Request) {
 	// Extract host ID and action from path: /api/v1/hosts/{id}/{action}
 	path := strings.TrimPrefix(r.URL.Path, "/api/v1/hosts/")
 	parts := strings.SplitN(path, "/", 2)
@@ -151,7 +151,7 @@ func (s *Server) handleHostByIDRoutes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	hostID := parts[0]
+	brokerID := parts[0]
 	action := ""
 	if len(parts) > 1 {
 		action = parts[1]
@@ -159,7 +159,7 @@ func (s *Server) handleHostByIDRoutes(w http.ResponseWriter, r *http.Request) {
 
 	switch action {
 	case "rotate-secret":
-		s.handleHostRotateSecret(w, r, hostID)
+		s.handleHostRotateSecret(w, r, brokerID)
 	default:
 		NotFound(w, "host action")
 	}
@@ -168,14 +168,14 @@ func (s *Server) handleHostByIDRoutes(w http.ResponseWriter, r *http.Request) {
 // handleHostRotateSecret handles POST /api/v1/hosts/{id}/rotate-secret.
 // Rotates the HMAC secret for a host.
 // Requires admin authentication or host self-rotation.
-func (s *Server) handleHostRotateSecret(w http.ResponseWriter, r *http.Request, hostID string) {
+func (s *Server) handleHostRotateSecret(w http.ResponseWriter, r *http.Request, brokerID string) {
 	if r.Method != http.MethodPost {
 		MethodNotAllowed(w)
 		return
 	}
 
 	// Check if host auth service is available
-	if s.hostAuthService == nil {
+	if s.brokerAuthService == nil {
 		writeError(w, http.StatusServiceUnavailable, ErrCodeUnavailable,
 			"host authentication service not configured", nil)
 		return
@@ -183,12 +183,12 @@ func (s *Server) handleHostRotateSecret(w http.ResponseWriter, r *http.Request, 
 
 	// Check authorization - either admin user or the host itself
 	user := GetUserIdentityFromContext(r.Context())
-	host := GetHostIdentityFromContext(r.Context())
+	broker := GetBrokerIdentityFromContext(r.Context())
 
 	authorized := false
 	if user != nil && user.Role() == "admin" {
 		authorized = true
-	} else if host != nil && host.HostID() == hostID {
+	} else if broker != nil && broker.BrokerID() == brokerID {
 		authorized = true
 	}
 
@@ -213,7 +213,7 @@ func (s *Server) handleHostRotateSecret(w http.ResponseWriter, r *http.Request, 
 	}
 
 	// Rotate the secret
-	resp, err := s.hostAuthService.RotateHostSecret(r.Context(), hostID, gracePeriod)
+	resp, err := s.brokerAuthService.RotateBrokerSecret(r.Context(), brokerID, gracePeriod)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, ErrCodeInternalError,
 			"failed to rotate secret: "+err.Error(), nil)
@@ -226,11 +226,11 @@ func (s *Server) handleHostRotateSecret(w http.ResponseWriter, r *http.Request, 
 	if user != nil {
 		actorID = user.ID()
 		actorType = "user"
-	} else if host != nil {
-		actorID = host.HostID()
+	} else if broker != nil {
+		actorID = broker.BrokerID()
 		actorType = "host"
 	}
-	LogRotateEvent(r.Context(), s.auditLogger, hostID, actorID, actorType, getClientIP(r))
+	LogRotateEvent(r.Context(), s.auditLogger, brokerID, actorID, actorType, getClientIP(r))
 
 	writeJSON(w, http.StatusOK, resp)
 }

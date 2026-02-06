@@ -298,7 +298,7 @@ func TestGroveList(t *testing.T) {
 }
 
 // ============================================================================
-// RuntimeHost Tests
+// RuntimeBroker Tests
 // ============================================================================
 
 func TestGroveLookupCaseInsensitive(t *testing.T) {
@@ -339,37 +339,37 @@ func TestRuntimeHostLookupByName(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a host
-	host := &store.RuntimeHost{
+	broker := &store.RuntimeBroker{
 		ID:     api.NewUUID(),
 		Name:   "My-Laptop",
 		Slug:   "my-laptop",
-		Mode:   store.HostModeConnected,
-		Status: store.HostStatusOnline,
+		Mode:   store.BrokerModeConnected,
+		Status: store.BrokerStatusOnline,
 	}
-	require.NoError(t, s.CreateRuntimeHost(ctx, host))
+	require.NoError(t, s.CreateRuntimeBroker(ctx, broker))
 
 	// Look up with exact case - should work
-	retrieved, err := s.GetRuntimeHostByName(ctx, "My-Laptop")
+	retrieved, err := s.GetRuntimeBrokerByName(ctx, "My-Laptop")
 	require.NoError(t, err)
-	assert.Equal(t, host.ID, retrieved.ID)
+	assert.Equal(t, broker.ID, retrieved.ID)
 
 	// Look up with different case - should still work (case-insensitive)
-	retrieved, err = s.GetRuntimeHostByName(ctx, "my-laptop")
+	retrieved, err = s.GetRuntimeBrokerByName(ctx, "my-laptop")
 	require.NoError(t, err)
-	assert.Equal(t, host.ID, retrieved.ID)
+	assert.Equal(t, broker.ID, retrieved.ID)
 
 	// Look up with all caps - should still work
-	retrieved, err = s.GetRuntimeHostByName(ctx, "MY-LAPTOP")
+	retrieved, err = s.GetRuntimeBrokerByName(ctx, "MY-LAPTOP")
 	require.NoError(t, err)
-	assert.Equal(t, host.ID, retrieved.ID)
+	assert.Equal(t, broker.ID, retrieved.ID)
 
 	// Look up non-existent - should return ErrNotFound
-	_, err = s.GetRuntimeHostByName(ctx, "nonexistent")
+	_, err = s.GetRuntimeBrokerByName(ctx, "nonexistent")
 	assert.ErrorIs(t, err, store.ErrNotFound)
 }
 
 // ============================================================================
-// RuntimeHost Tests
+// RuntimeBroker Tests
 // ============================================================================
 
 func TestRuntimeHostCRUD(t *testing.T) {
@@ -377,60 +377,60 @@ func TestRuntimeHostCRUD(t *testing.T) {
 	ctx := context.Background()
 
 	// Create host
-	host := &store.RuntimeHost{
+	broker := &store.RuntimeBroker{
 		ID:      api.NewUUID(),
 		Name:    "Dev Laptop",
 		Slug:    "dev-laptop",
-		Mode:    store.HostModeConnected,
+		Mode:    store.BrokerModeConnected,
 		Version: "1.0.0",
-		Status:  store.HostStatusOnline,
-		Capabilities: &store.HostCapabilities{
+		Status:  store.BrokerStatusOnline,
+		Capabilities: &store.BrokerCapabilities{
 			WebPTY: true,
 			Sync:   true,
 			Attach: true,
 		},
-		Profiles: []store.HostProfile{
+		Profiles: []store.BrokerProfile{
 			{Name: "default", Type: "docker", Available: true},
 		},
 	}
 
-	err := s.CreateRuntimeHost(ctx, host)
+	err := s.CreateRuntimeBroker(ctx, broker)
 	require.NoError(t, err)
-	assert.NotZero(t, host.Created)
+	assert.NotZero(t, broker.Created)
 
 	// Get host
-	retrieved, err := s.GetRuntimeHost(ctx, host.ID)
+	retrieved, err := s.GetRuntimeBroker(ctx, broker.ID)
 	require.NoError(t, err)
-	assert.Equal(t, host.Name, retrieved.Name)
+	assert.Equal(t, broker.Name, retrieved.Name)
 	assert.True(t, retrieved.Capabilities.WebPTY)
 	assert.Len(t, retrieved.Profiles, 1)
 	assert.Equal(t, "docker", retrieved.Profiles[0].Type)
 
 	// Update host
-	retrieved.Status = store.HostStatusOffline
-	err = s.UpdateRuntimeHost(ctx, retrieved)
+	retrieved.Status = store.BrokerStatusOffline
+	err = s.UpdateRuntimeBroker(ctx, retrieved)
 	require.NoError(t, err)
 
 	// Verify update
-	retrieved, err = s.GetRuntimeHost(ctx, host.ID)
+	retrieved, err = s.GetRuntimeBroker(ctx, broker.ID)
 	require.NoError(t, err)
-	assert.Equal(t, store.HostStatusOffline, retrieved.Status)
+	assert.Equal(t, store.BrokerStatusOffline, retrieved.Status)
 
 	// Update heartbeat
-	err = s.UpdateRuntimeHostHeartbeat(ctx, host.ID, store.HostStatusOnline)
+	err = s.UpdateRuntimeBrokerHeartbeat(ctx, broker.ID, store.BrokerStatusOnline)
 	require.NoError(t, err)
 
 	// Verify heartbeat
-	retrieved, err = s.GetRuntimeHost(ctx, host.ID)
+	retrieved, err = s.GetRuntimeBroker(ctx, broker.ID)
 	require.NoError(t, err)
-	assert.Equal(t, store.HostStatusOnline, retrieved.Status)
+	assert.Equal(t, store.BrokerStatusOnline, retrieved.Status)
 	assert.NotZero(t, retrieved.LastHeartbeat)
 
 	// Delete host
-	err = s.DeleteRuntimeHost(ctx, host.ID)
+	err = s.DeleteRuntimeBroker(ctx, broker.ID)
 	require.NoError(t, err)
 
-	_, err = s.GetRuntimeHost(ctx, host.ID)
+	_, err = s.GetRuntimeBroker(ctx, broker.ID)
 	assert.ErrorIs(t, err, store.ErrNotFound)
 }
 
@@ -440,29 +440,29 @@ func TestRuntimeHostList(t *testing.T) {
 
 	// Create hosts
 	for i := 0; i < 3; i++ {
-		host := &store.RuntimeHost{
+		broker := &store.RuntimeBroker{
 			ID:     api.NewUUID(),
 			Name:   "Host " + string(rune('A'+i)),
 			Slug:   "host-" + string(rune('a'+i)),
-			Mode:   store.HostModeConnected,
-			Status: store.HostStatusOnline,
-			Profiles: []store.HostProfile{
+			Mode:   store.BrokerModeConnected,
+			Status: store.BrokerStatusOnline,
+			Profiles: []store.BrokerProfile{
 				{Name: "default", Type: "docker", Available: true},
 			},
 		}
 		if i == 0 {
-			host.Status = store.HostStatusOffline
+			broker.Status = store.BrokerStatusOffline
 		}
-		require.NoError(t, s.CreateRuntimeHost(ctx, host))
+		require.NoError(t, s.CreateRuntimeBroker(ctx, broker))
 	}
 
 	// List all
-	result, err := s.ListRuntimeHosts(ctx, store.RuntimeHostFilter{}, store.ListOptions{})
+	result, err := s.ListRuntimeBrokers(ctx, store.RuntimeBrokerFilter{}, store.ListOptions{})
 	require.NoError(t, err)
 	assert.Equal(t, 3, result.TotalCount)
 
 	// List by status
-	result, err = s.ListRuntimeHosts(ctx, store.RuntimeHostFilter{Status: store.HostStatusOffline}, store.ListOptions{})
+	result, err = s.ListRuntimeBrokers(ctx, store.RuntimeBrokerFilter{Status: store.BrokerStatusOffline}, store.ListOptions{})
 	require.NoError(t, err)
 	assert.Equal(t, 1, result.TotalCount)
 }
@@ -669,47 +669,47 @@ func TestGroveContributors(t *testing.T) {
 	require.NoError(t, s.CreateGrove(ctx, grove))
 
 	// Create hosts
-	host1 := &store.RuntimeHost{
+	broker1 := &store.RuntimeBroker{
 		ID:     api.NewUUID(),
 		Name:   "Host 1",
 		Slug:   "host-1",
-		Mode:   store.HostModeConnected,
-		Status: store.HostStatusOnline,
-		Profiles: []store.HostProfile{
+		Mode:   store.BrokerModeConnected,
+		Status: store.BrokerStatusOnline,
+		Profiles: []store.BrokerProfile{
 			{Name: "docker", Type: "docker", Available: true},
 			{Name: "dev", Type: "docker", Available: true},
 		},
 	}
-	require.NoError(t, s.CreateRuntimeHost(ctx, host1))
+	require.NoError(t, s.CreateRuntimeBroker(ctx, broker1))
 
-	host2 := &store.RuntimeHost{
+	broker2 := &store.RuntimeBroker{
 		ID:     api.NewUUID(),
 		Name:   "Host 2",
 		Slug:   "host-2",
-		Mode:   store.HostModeConnected,
-		Status: store.HostStatusOnline,
-		Profiles: []store.HostProfile{
+		Mode:   store.BrokerModeConnected,
+		Status: store.BrokerStatusOnline,
+		Profiles: []store.BrokerProfile{
 			{Name: "k8s-prod", Type: "kubernetes", Available: true},
 		},
 	}
-	require.NoError(t, s.CreateRuntimeHost(ctx, host2))
+	require.NoError(t, s.CreateRuntimeBroker(ctx, broker2))
 
 	// Add contributors
 	contrib1 := &store.GroveContributor{
 		GroveID:  grove.ID,
-		HostID:   host1.ID,
-		HostName: host1.Name,
-		Mode:     store.HostModeConnected,
-		Status:   store.HostStatusOnline,
+		BrokerID:   broker1.ID,
+		BrokerName: broker1.Name,
+		Mode:     store.BrokerModeConnected,
+		Status:   store.BrokerStatusOnline,
 	}
 	require.NoError(t, s.AddGroveContributor(ctx, contrib1))
 
 	contrib2 := &store.GroveContributor{
 		GroveID:  grove.ID,
-		HostID:   host2.ID,
-		HostName: host2.Name,
-		Mode:     store.HostModeReadOnly,
-		Status:   store.HostStatusOnline,
+		BrokerID:   broker2.ID,
+		BrokerName: broker2.Name,
+		Mode:     store.BrokerModeReadOnly,
+		Status:   store.BrokerStatusOnline,
 	}
 	require.NoError(t, s.AddGroveContributor(ctx, contrib2))
 
@@ -719,37 +719,37 @@ func TestGroveContributors(t *testing.T) {
 	assert.Len(t, contributors, 2)
 
 	// Get host groves
-	groves, err := s.GetHostGroves(ctx, host1.ID)
+	groves, err := s.GetHostGroves(ctx, broker1.ID)
 	require.NoError(t, err)
 	assert.Len(t, groves, 1)
 	assert.Equal(t, grove.ID, groves[0].GroveID)
 
 	// Update contributor status
-	err = s.UpdateContributorStatus(ctx, grove.ID, host1.ID, store.HostStatusOffline)
+	err = s.UpdateContributorStatus(ctx, grove.ID, broker1.ID, store.BrokerStatusOffline)
 	require.NoError(t, err)
 
 	// Verify update
 	contributors, err = s.GetGroveContributors(ctx, grove.ID)
 	require.NoError(t, err)
 	for _, c := range contributors {
-		if c.HostID == host1.ID {
-			assert.Equal(t, store.HostStatusOffline, c.Status)
+		if c.BrokerID == broker1.ID {
+			assert.Equal(t, store.BrokerStatusOffline, c.Status)
 		}
 	}
 
 	// Verify grove's active host count
 	retrievedGrove, err := s.GetGrove(ctx, grove.ID)
 	require.NoError(t, err)
-	assert.Equal(t, 1, retrievedGrove.ActiveHostCount) // Only host2 is online
+	assert.Equal(t, 1, retrievedGrove.ActiveHostCount) // Only broker2 is online
 
 	// Remove contributor
-	err = s.RemoveGroveContributor(ctx, grove.ID, host1.ID)
+	err = s.RemoveGroveContributor(ctx, grove.ID, broker1.ID)
 	require.NoError(t, err)
 
 	contributors, err = s.GetGroveContributors(ctx, grove.ID)
 	require.NoError(t, err)
 	assert.Len(t, contributors, 1)
-	assert.Equal(t, host2.ID, contributors[0].HostID)
+	assert.Equal(t, broker2.ID, contributors[0].BrokerID)
 }
 
 // ============================================================================
@@ -814,11 +814,11 @@ func TestNotFoundErrors(t *testing.T) {
 	err = s.DeleteGrove(ctx, nonExistentID)
 	assert.ErrorIs(t, err, store.ErrNotFound)
 
-	// RuntimeHost
-	_, err = s.GetRuntimeHost(ctx, nonExistentID)
+	// RuntimeBroker
+	_, err = s.GetRuntimeBroker(ctx, nonExistentID)
 	assert.ErrorIs(t, err, store.ErrNotFound)
 
-	err = s.DeleteRuntimeHost(ctx, nonExistentID)
+	err = s.DeleteRuntimeBroker(ctx, nonExistentID)
 	assert.ErrorIs(t, err, store.ErrNotFound)
 
 	// Template

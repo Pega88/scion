@@ -26,15 +26,15 @@ func createTestStore(t *testing.T) store.Store {
 	return s
 }
 
-// mockRuntimeHostClient is a mock implementation of RuntimeHostClient for testing.
-type mockRuntimeHostClient struct {
+// mockRuntimeBrokerClient is a mock implementation of RuntimeBrokerClient for testing.
+type mockRuntimeBrokerClient struct {
 	createCalled   bool
 	startCalled    bool
 	stopCalled     bool
 	restartCalled  bool
 	deleteCalled   bool
 	messageCalled  bool
-	lastHostID     string
+	lastBrokerID string
 	lastEndpoint   string
 	lastAgentID    string
 	lastMessage    string
@@ -43,9 +43,9 @@ type mockRuntimeHostClient struct {
 	returnErr      error
 }
 
-func (m *mockRuntimeHostClient) CreateAgent(ctx context.Context, hostID, hostEndpoint string, req *RemoteCreateAgentRequest) (*RemoteAgentResponse, error) {
+func (m *mockRuntimeBrokerClient) CreateAgent(ctx context.Context, brokerID, hostEndpoint string, req *RemoteCreateAgentRequest) (*RemoteAgentResponse, error) {
 	m.createCalled = true
-	m.lastHostID = hostID
+	m.lastBrokerID = brokerID
 	m.lastEndpoint = hostEndpoint
 	if m.returnErr != nil {
 		return nil, m.returnErr
@@ -62,33 +62,33 @@ func (m *mockRuntimeHostClient) CreateAgent(ctx context.Context, hostID, hostEnd
 	}, nil
 }
 
-func (m *mockRuntimeHostClient) StartAgent(ctx context.Context, hostID, hostEndpoint, agentID string) error {
+func (m *mockRuntimeBrokerClient) StartAgent(ctx context.Context, brokerID, hostEndpoint, agentID string) error {
 	m.startCalled = true
-	m.lastHostID = hostID
+	m.lastBrokerID = brokerID
 	m.lastEndpoint = hostEndpoint
 	m.lastAgentID = agentID
 	return m.returnErr
 }
 
-func (m *mockRuntimeHostClient) StopAgent(ctx context.Context, hostID, hostEndpoint, agentID string) error {
+func (m *mockRuntimeBrokerClient) StopAgent(ctx context.Context, brokerID, hostEndpoint, agentID string) error {
 	m.stopCalled = true
-	m.lastHostID = hostID
+	m.lastBrokerID = brokerID
 	m.lastEndpoint = hostEndpoint
 	m.lastAgentID = agentID
 	return m.returnErr
 }
 
-func (m *mockRuntimeHostClient) RestartAgent(ctx context.Context, hostID, hostEndpoint, agentID string) error {
+func (m *mockRuntimeBrokerClient) RestartAgent(ctx context.Context, brokerID, hostEndpoint, agentID string) error {
 	m.restartCalled = true
-	m.lastHostID = hostID
+	m.lastBrokerID = brokerID
 	m.lastEndpoint = hostEndpoint
 	m.lastAgentID = agentID
 	return m.returnErr
 }
 
-func (m *mockRuntimeHostClient) DeleteAgent(ctx context.Context, hostID, hostEndpoint, agentID string, deleteFiles, removeBranch bool) error {
+func (m *mockRuntimeBrokerClient) DeleteAgent(ctx context.Context, brokerID, hostEndpoint, agentID string, deleteFiles, removeBranch bool) error {
 	m.deleteCalled = true
-	m.lastHostID = hostID
+	m.lastBrokerID = brokerID
 	m.lastEndpoint = hostEndpoint
 	m.lastAgentID = agentID
 	m.lastDeleteOpts.deleteFiles = deleteFiles
@@ -96,9 +96,9 @@ func (m *mockRuntimeHostClient) DeleteAgent(ctx context.Context, hostID, hostEnd
 	return m.returnErr
 }
 
-func (m *mockRuntimeHostClient) MessageAgent(ctx context.Context, hostID, hostEndpoint, agentID, message string, interrupt bool) error {
+func (m *mockRuntimeBrokerClient) MessageAgent(ctx context.Context, brokerID, hostEndpoint, agentID, message string, interrupt bool) error {
 	m.messageCalled = true
-	m.lastHostID = hostID
+	m.lastBrokerID = brokerID
 	m.lastEndpoint = hostEndpoint
 	m.lastAgentID = agentID
 	m.lastMessage = message
@@ -111,25 +111,25 @@ func TestHTTPAgentDispatcher_DispatchAgentCreate(t *testing.T) {
 	memStore := createTestStore(t)
 
 	// Create a runtime host with an endpoint
-	host := &store.RuntimeHost{
+	broker := &store.RuntimeBroker{
 		ID:       "host-1",
 		Name:     "test-host",
 		Slug:     "test-host",
 		Endpoint: "http://localhost:9800",
-		Status:   store.HostStatusOnline,
+		Status:   store.BrokerStatusOnline,
 	}
-	if err := memStore.CreateRuntimeHost(ctx, host); err != nil {
+	if err := memStore.CreateRuntimeBroker(ctx, broker); err != nil {
 		t.Fatalf("failed to create runtime host: %v", err)
 	}
 
-	mockClient := &mockRuntimeHostClient{}
+	mockClient := &mockRuntimeBrokerClient{}
 	dispatcher := NewHTTPAgentDispatcherWithClient(memStore, mockClient, false)
 
 	agent := &store.Agent{
 		ID:            "agent-1",
 		Name:          "test-agent",
 		GroveID:       "grove-1",
-		RuntimeHostID: "host-1",
+		RuntimeBrokerID: "host-1",
 		AppliedConfig: &store.AgentAppliedConfig{
 			Harness: "claude",
 			Task:    "Fix a bug",
@@ -153,23 +153,23 @@ func TestHTTPAgentDispatcher_DispatchAgentStop(t *testing.T) {
 	ctx := context.Background()
 	memStore := createTestStore(t)
 
-	host := &store.RuntimeHost{
+	broker := &store.RuntimeBroker{
 		ID:       "host-1",
 		Name:     "test-host",
 		Endpoint: "http://localhost:9800",
-		Status:   store.HostStatusOnline,
+		Status:   store.BrokerStatusOnline,
 	}
-	if err := memStore.CreateRuntimeHost(ctx, host); err != nil {
+	if err := memStore.CreateRuntimeBroker(ctx, broker); err != nil {
 		t.Fatalf("failed to create runtime host: %v", err)
 	}
 
-	mockClient := &mockRuntimeHostClient{}
+	mockClient := &mockRuntimeBrokerClient{}
 	dispatcher := NewHTTPAgentDispatcherWithClient(memStore, mockClient, false)
 
 	agent := &store.Agent{
 		ID:            "agent-1",
 		Name:          "test-agent",
-		RuntimeHostID: "host-1",
+		RuntimeBrokerID: "host-1",
 	}
 
 	err := dispatcher.DispatchAgentStop(ctx, agent)
@@ -189,23 +189,23 @@ func TestHTTPAgentDispatcher_DispatchAgentDelete(t *testing.T) {
 	ctx := context.Background()
 	memStore := createTestStore(t)
 
-	host := &store.RuntimeHost{
+	broker := &store.RuntimeBroker{
 		ID:       "host-1",
 		Name:     "test-host",
 		Endpoint: "http://localhost:9800",
-		Status:   store.HostStatusOnline,
+		Status:   store.BrokerStatusOnline,
 	}
-	if err := memStore.CreateRuntimeHost(ctx, host); err != nil {
+	if err := memStore.CreateRuntimeBroker(ctx, broker); err != nil {
 		t.Fatalf("failed to create runtime host: %v", err)
 	}
 
-	mockClient := &mockRuntimeHostClient{}
+	mockClient := &mockRuntimeBrokerClient{}
 	dispatcher := NewHTTPAgentDispatcherWithClient(memStore, mockClient, false)
 
 	agent := &store.Agent{
 		ID:            "agent-1",
 		Name:          "test-agent",
-		RuntimeHostID: "host-1",
+		RuntimeBrokerID: "host-1",
 	}
 
 	err := dispatcher.DispatchAgentDelete(ctx, agent, true, false)
@@ -228,23 +228,23 @@ func TestHTTPAgentDispatcher_DispatchAgentMessage(t *testing.T) {
 	ctx := context.Background()
 	memStore := createTestStore(t)
 
-	host := &store.RuntimeHost{
+	broker := &store.RuntimeBroker{
 		ID:       "host-1",
 		Name:     "test-host",
 		Endpoint: "http://localhost:9800",
-		Status:   store.HostStatusOnline,
+		Status:   store.BrokerStatusOnline,
 	}
-	if err := memStore.CreateRuntimeHost(ctx, host); err != nil {
+	if err := memStore.CreateRuntimeBroker(ctx, broker); err != nil {
 		t.Fatalf("failed to create runtime host: %v", err)
 	}
 
-	mockClient := &mockRuntimeHostClient{}
+	mockClient := &mockRuntimeBrokerClient{}
 	dispatcher := NewHTTPAgentDispatcherWithClient(memStore, mockClient, false)
 
 	agent := &store.Agent{
 		ID:            "agent-1",
 		Name:          "test-agent",
-		RuntimeHostID: "host-1",
+		RuntimeBrokerID: "host-1",
 	}
 
 	err := dispatcher.DispatchAgentMessage(ctx, agent, "Hello, agent!", true)
@@ -263,7 +263,7 @@ func TestHTTPAgentDispatcher_DispatchAgentMessage(t *testing.T) {
 	}
 }
 
-func TestHTTPRuntimeHostClient_CreateAgent(t *testing.T) {
+func TestHTTPRuntimeBrokerClient_CreateAgent(t *testing.T) {
 	// Create a mock server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -295,7 +295,7 @@ func TestHTTPRuntimeHostClient_CreateAgent(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewHTTPRuntimeHostClient()
+	client := NewHTTPRuntimeBrokerClient()
 
 	req := &RemoteCreateAgentRequest{
 		AgentID: "agent-1",
@@ -316,7 +316,7 @@ func TestHTTPRuntimeHostClient_CreateAgent(t *testing.T) {
 	}
 }
 
-func TestHTTPRuntimeHostClient_StopAgent(t *testing.T) {
+func TestHTTPRuntimeBrokerClient_StopAgent(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Errorf("expected POST, got %s", r.Method)
@@ -329,7 +329,7 @@ func TestHTTPRuntimeHostClient_StopAgent(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewHTTPRuntimeHostClient()
+	client := NewHTTPRuntimeBrokerClient()
 
 	err := client.StopAgent(context.Background(), "host-1", server.URL, "test-agent")
 	if err != nil {
@@ -337,7 +337,7 @@ func TestHTTPRuntimeHostClient_StopAgent(t *testing.T) {
 	}
 }
 
-func TestHTTPRuntimeHostClient_DeleteAgent(t *testing.T) {
+func TestHTTPRuntimeBrokerClient_DeleteAgent(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodDelete {
 			t.Errorf("expected DELETE, got %s", r.Method)
@@ -358,7 +358,7 @@ func TestHTTPRuntimeHostClient_DeleteAgent(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewHTTPRuntimeHostClient()
+	client := NewHTTPRuntimeBrokerClient()
 
 	err := client.DeleteAgent(context.Background(), "host-1", server.URL, "test-agent", true, false)
 	if err != nil {
@@ -366,7 +366,7 @@ func TestHTTPRuntimeHostClient_DeleteAgent(t *testing.T) {
 	}
 }
 
-func TestHTTPRuntimeHostClient_MessageAgent(t *testing.T) {
+func TestHTTPRuntimeBrokerClient_MessageAgent(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Errorf("expected POST, got %s", r.Method)
@@ -391,7 +391,7 @@ func TestHTTPRuntimeHostClient_MessageAgent(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewHTTPRuntimeHostClient()
+	client := NewHTTPRuntimeBrokerClient()
 
 	err := client.MessageAgent(context.Background(), "host-1", server.URL, "test-agent", "Hello!", true)
 	if err != nil {

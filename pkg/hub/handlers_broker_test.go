@@ -19,14 +19,14 @@ func TestAgentCreate_HostResolution(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a runtime host
-	host := &store.RuntimeHost{
+	broker := &store.RuntimeBroker{
 		ID:     "host_id_123",
 		Name:   "My Laptop",
 		Slug:   "my-laptop",
-		Mode:   store.HostModeConnected,
-		Status: store.HostStatusOnline,
+		Mode:   store.BrokerModeConnected,
+		Status: store.BrokerStatusOnline,
 	}
-	require.NoError(t, s.CreateRuntimeHost(ctx, host))
+	require.NoError(t, s.CreateRuntimeBroker(ctx, broker))
 
 	// Create a grove
 	grove := &store.Grove{
@@ -41,10 +41,10 @@ func TestAgentCreate_HostResolution(t *testing.T) {
 	// Register host as contributor
 	contrib := &store.GroveContributor{
 		GroveID:  grove.ID,
-		HostID:   host.ID,
-		HostName: host.Name,
-		Mode:     host.Mode,
-		Status:   store.HostStatusOnline,
+		BrokerID:   broker.ID,
+		BrokerName: broker.Name,
+		Mode:     broker.Mode,
+		Status:   store.BrokerStatusOnline,
 	}
 	require.NoError(t, s.AddGroveContributor(ctx, contrib))
 
@@ -52,49 +52,49 @@ func TestAgentCreate_HostResolution(t *testing.T) {
 		body := map[string]interface{}{
 			"name":          "Agent ID",
 			"groveId":       grove.ID,
-			"runtimeHostId": "host_id_123",
+			"runtimeBrokerId": "host_id_123",
 		}
 		rec := doRequest(t, srv, http.MethodPost, "/api/v1/agents", body)
 		assert.Equal(t, http.StatusCreated, rec.Code)
 		
 		var resp CreateAgentResponse
 		require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
-		assert.Equal(t, "host_id_123", resp.Agent.RuntimeHostID)
+		assert.Equal(t, "host_id_123", resp.Agent.RuntimeBrokerID)
 	})
 
 	t.Run("Resolve by Name", func(t *testing.T) {
 		body := map[string]interface{}{
 			"name":          "Agent Name",
 			"groveId":       grove.ID,
-			"runtimeHostId": "My Laptop",
+			"runtimeBrokerId": "My Laptop",
 		}
 		rec := doRequest(t, srv, http.MethodPost, "/api/v1/agents", body)
 		assert.Equal(t, http.StatusCreated, rec.Code)
 		
 		var resp CreateAgentResponse
 		require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
-		assert.Equal(t, "host_id_123", resp.Agent.RuntimeHostID)
+		assert.Equal(t, "host_id_123", resp.Agent.RuntimeBrokerID)
 	})
 
 	t.Run("Resolve by Slug", func(t *testing.T) {
 		body := map[string]interface{}{
 			"name":          "Agent Slug",
 			"groveId":       grove.ID,
-			"runtimeHostId": "my-laptop",
+			"runtimeBrokerId": "my-laptop",
 		}
 		rec := doRequest(t, srv, http.MethodPost, "/api/v1/agents", body)
 		assert.Equal(t, http.StatusCreated, rec.Code)
 		
 		var resp CreateAgentResponse
 		require.NoError(t, json.NewDecoder(rec.Body).Decode(&resp))
-		assert.Equal(t, "host_id_123", resp.Agent.RuntimeHostID)
+		assert.Equal(t, "host_id_123", resp.Agent.RuntimeBrokerID)
 	})
 
 	t.Run("Invalid host", func(t *testing.T) {
 		body := map[string]interface{}{
 			"name":          "Agent Invalid",
 			"groveId":       grove.ID,
-			"runtimeHostId": "non-existent",
+			"runtimeBrokerId": "non-existent",
 		}
 		rec := doRequest(t, srv, http.MethodPost, "/api/v1/agents", body)
 		assert.Equal(t, http.StatusServiceUnavailable, rec.Code)

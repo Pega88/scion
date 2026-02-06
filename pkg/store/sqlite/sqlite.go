@@ -184,7 +184,7 @@ CREATE TABLE IF NOT EXISTS agents (
 	image TEXT,
 	detached INTEGER NOT NULL DEFAULT 1,
 	runtime TEXT,
-	runtime_host_id TEXT,
+	runtime_broker_id TEXT,
 	web_pty_enabled INTEGER NOT NULL DEFAULT 0,
 	task_summary TEXT,
 	applied_config TEXT,
@@ -196,12 +196,12 @@ CREATE TABLE IF NOT EXISTS agents (
 	visibility TEXT NOT NULL DEFAULT 'private',
 	state_version INTEGER NOT NULL DEFAULT 1,
 	FOREIGN KEY (grove_id) REFERENCES groves(id) ON DELETE CASCADE,
-	FOREIGN KEY (runtime_host_id) REFERENCES runtime_hosts(id) ON DELETE SET NULL
+	FOREIGN KEY (runtime_broker_id) REFERENCES runtime_hosts(id) ON DELETE SET NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_grove_slug ON agents(grove_id, agent_id);
 CREATE INDEX IF NOT EXISTS idx_agents_grove ON agents(grove_id);
 CREATE INDEX IF NOT EXISTS idx_agents_status ON agents(status);
-CREATE INDEX IF NOT EXISTS idx_agents_runtime_host ON agents(runtime_host_id);
+CREATE INDEX IF NOT EXISTS idx_agents_runtime_host ON agents(runtime_broker_id);
 
 -- Templates table
 CREATE TABLE IF NOT EXISTS templates (
@@ -238,11 +238,11 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 `
 
-// Migration V2: Add default_runtime_host_id to groves
+// Migration V2: Add default_runtime_broker_id to groves
 const migrationV2 = `
 -- Add default runtime host to groves
-ALTER TABLE groves ADD COLUMN default_runtime_host_id TEXT REFERENCES runtime_hosts(id) ON DELETE SET NULL;
-CREATE INDEX IF NOT EXISTS idx_groves_default_runtime_host ON groves(default_runtime_host_id);
+ALTER TABLE groves ADD COLUMN default_runtime_broker_id TEXT REFERENCES runtime_hosts(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_groves_default_runtime_host ON groves(default_runtime_broker_id);
 `
 
 // Migration V3: Add local_path to grove_contributors
@@ -482,7 +482,7 @@ func (s *SQLiteStore) CreateAgent(ctx context.Context, agent *store.Agent) error
 			id, agent_id, name, template, grove_id,
 			labels, annotations,
 			status, connection_state, container_status, session_status, runtime_state,
-			image, detached, runtime, runtime_host_id, web_pty_enabled, task_summary, message,
+			image, detached, runtime, runtime_broker_id, web_pty_enabled, task_summary, message,
 			applied_config,
 			created_at, updated_at, last_seen,
 			created_by, owner_id, visibility, state_version
@@ -491,7 +491,7 @@ func (s *SQLiteStore) CreateAgent(ctx context.Context, agent *store.Agent) error
 		agent.ID, agent.AgentID, agent.Name, agent.Template, agent.GroveID,
 		marshalJSON(agent.Labels), marshalJSON(agent.Annotations),
 		agent.Status, agent.ConnectionState, agent.ContainerStatus, agent.SessionStatus, agent.RuntimeState,
-		agent.Image, agent.Detached, agent.Runtime, nullableString(agent.RuntimeHostID), agent.WebPTYEnabled, agent.TaskSummary, agent.Message,
+		agent.Image, agent.Detached, agent.Runtime, nullableString(agent.RuntimeBrokerID), agent.WebPTYEnabled, agent.TaskSummary, agent.Message,
 		marshalJSON(agent.AppliedConfig),
 		agent.Created, agent.Updated, nullableTime(agent.LastSeen),
 		agent.CreatedBy, agent.OwnerID, agent.Visibility, agent.StateVersion,
@@ -509,13 +509,13 @@ func (s *SQLiteStore) GetAgent(ctx context.Context, id string) (*store.Agent, er
 	agent := &store.Agent{}
 	var labels, annotations, appliedConfig string
 	var lastSeen sql.NullTime
-	var runtimeHostID, message sql.NullString
+	var runtimeBrokerID, message sql.NullString
 
 	err := s.db.QueryRowContext(ctx, `
 		SELECT id, agent_id, name, template, grove_id,
 			labels, annotations,
 			status, connection_state, container_status, session_status, runtime_state,
-			image, detached, runtime, runtime_host_id, web_pty_enabled, task_summary, message,
+			image, detached, runtime, runtime_broker_id, web_pty_enabled, task_summary, message,
 			applied_config,
 			created_at, updated_at, last_seen,
 			created_by, owner_id, visibility, state_version
@@ -524,7 +524,7 @@ func (s *SQLiteStore) GetAgent(ctx context.Context, id string) (*store.Agent, er
 		&agent.ID, &agent.AgentID, &agent.Name, &agent.Template, &agent.GroveID,
 		&labels, &annotations,
 		&agent.Status, &agent.ConnectionState, &agent.ContainerStatus, &agent.SessionStatus, &agent.RuntimeState,
-		&agent.Image, &agent.Detached, &agent.Runtime, &runtimeHostID, &agent.WebPTYEnabled, &agent.TaskSummary, &message,
+		&agent.Image, &agent.Detached, &agent.Runtime, &runtimeBrokerID, &agent.WebPTYEnabled, &agent.TaskSummary, &message,
 		&appliedConfig,
 		&agent.Created, &agent.Updated, &lastSeen,
 		&agent.CreatedBy, &agent.OwnerID, &agent.Visibility, &agent.StateVersion,
@@ -542,8 +542,8 @@ func (s *SQLiteStore) GetAgent(ctx context.Context, id string) (*store.Agent, er
 	if lastSeen.Valid {
 		agent.LastSeen = lastSeen.Time
 	}
-	if runtimeHostID.Valid {
-		agent.RuntimeHostID = runtimeHostID.String
+	if runtimeBrokerID.Valid {
+		agent.RuntimeBrokerID = runtimeBrokerID.String
 	}
 	if message.Valid {
 		agent.Message = message.String
@@ -556,13 +556,13 @@ func (s *SQLiteStore) GetAgentBySlug(ctx context.Context, groveID, slug string) 
 	agent := &store.Agent{}
 	var labels, annotations, appliedConfig string
 	var lastSeen sql.NullTime
-	var runtimeHostID, message sql.NullString
+	var runtimeBrokerID, message sql.NullString
 
 	err := s.db.QueryRowContext(ctx, `
 		SELECT id, agent_id, name, template, grove_id,
 			labels, annotations,
 			status, connection_state, container_status, session_status, runtime_state,
-			image, detached, runtime, runtime_host_id, web_pty_enabled, task_summary, message,
+			image, detached, runtime, runtime_broker_id, web_pty_enabled, task_summary, message,
 			applied_config,
 			created_at, updated_at, last_seen,
 			created_by, owner_id, visibility, state_version
@@ -571,7 +571,7 @@ func (s *SQLiteStore) GetAgentBySlug(ctx context.Context, groveID, slug string) 
 		&agent.ID, &agent.AgentID, &agent.Name, &agent.Template, &agent.GroveID,
 		&labels, &annotations,
 		&agent.Status, &agent.ConnectionState, &agent.ContainerStatus, &agent.SessionStatus, &agent.RuntimeState,
-		&agent.Image, &agent.Detached, &agent.Runtime, &runtimeHostID, &agent.WebPTYEnabled, &agent.TaskSummary, &message,
+		&agent.Image, &agent.Detached, &agent.Runtime, &runtimeBrokerID, &agent.WebPTYEnabled, &agent.TaskSummary, &message,
 		&appliedConfig,
 		&agent.Created, &agent.Updated, &lastSeen,
 		&agent.CreatedBy, &agent.OwnerID, &agent.Visibility, &agent.StateVersion,
@@ -589,8 +589,8 @@ func (s *SQLiteStore) GetAgentBySlug(ctx context.Context, groveID, slug string) 
 	if lastSeen.Valid {
 		agent.LastSeen = lastSeen.Time
 	}
-	if runtimeHostID.Valid {
-		agent.RuntimeHostID = runtimeHostID.String
+	if runtimeBrokerID.Valid {
+		agent.RuntimeBrokerID = runtimeBrokerID.String
 	}
 	if message.Valid {
 		agent.Message = message.String
@@ -608,7 +608,7 @@ func (s *SQLiteStore) UpdateAgent(ctx context.Context, agent *store.Agent) error
 			agent_id = ?, name = ?, template = ?,
 			labels = ?, annotations = ?,
 			status = ?, connection_state = ?, container_status = ?, session_status = ?, runtime_state = ?,
-			image = ?, detached = ?, runtime = ?, runtime_host_id = ?, web_pty_enabled = ?, task_summary = ?, message = ?,
+			image = ?, detached = ?, runtime = ?, runtime_broker_id = ?, web_pty_enabled = ?, task_summary = ?, message = ?,
 			applied_config = ?,
 			updated_at = ?, last_seen = ?,
 			owner_id = ?, visibility = ?, state_version = ?
@@ -617,7 +617,7 @@ func (s *SQLiteStore) UpdateAgent(ctx context.Context, agent *store.Agent) error
 		agent.AgentID, agent.Name, agent.Template,
 		marshalJSON(agent.Labels), marshalJSON(agent.Annotations),
 		agent.Status, agent.ConnectionState, agent.ContainerStatus, agent.SessionStatus, agent.RuntimeState,
-		agent.Image, agent.Detached, agent.Runtime, nullableString(agent.RuntimeHostID), agent.WebPTYEnabled, agent.TaskSummary, agent.Message,
+		agent.Image, agent.Detached, agent.Runtime, nullableString(agent.RuntimeBrokerID), agent.WebPTYEnabled, agent.TaskSummary, agent.Message,
 		marshalJSON(agent.AppliedConfig),
 		agent.Updated, nullableTime(agent.LastSeen),
 		agent.OwnerID, agent.Visibility, newVersion,
@@ -668,9 +668,9 @@ func (s *SQLiteStore) ListAgents(ctx context.Context, filter store.AgentFilter, 
 		conditions = append(conditions, "grove_id = ?")
 		args = append(args, filter.GroveID)
 	}
-	if filter.RuntimeHostID != "" {
-		conditions = append(conditions, "runtime_host_id = ?")
-		args = append(args, filter.RuntimeHostID)
+	if filter.RuntimeBrokerID != "" {
+		conditions = append(conditions, "runtime_broker_id = ?")
+		args = append(args, filter.RuntimeBrokerID)
 	}
 	if filter.Status != "" {
 		conditions = append(conditions, "status = ?")
@@ -706,7 +706,7 @@ func (s *SQLiteStore) ListAgents(ctx context.Context, filter store.AgentFilter, 
 		SELECT id, agent_id, name, template, grove_id,
 			labels, annotations,
 			status, connection_state, container_status, session_status, runtime_state,
-			image, detached, runtime, runtime_host_id, web_pty_enabled, task_summary, message,
+			image, detached, runtime, runtime_broker_id, web_pty_enabled, task_summary, message,
 			applied_config,
 			created_at, updated_at, last_seen,
 			created_by, owner_id, visibility, state_version
@@ -725,13 +725,13 @@ func (s *SQLiteStore) ListAgents(ctx context.Context, filter store.AgentFilter, 
 		var agent store.Agent
 		var labels, annotations, appliedConfig string
 		var lastSeen sql.NullTime
-		var runtimeHostID, message sql.NullString
+		var runtimeBrokerID, message sql.NullString
 
 		if err := rows.Scan(
 			&agent.ID, &agent.AgentID, &agent.Name, &agent.Template, &agent.GroveID,
 			&labels, &annotations,
 			&agent.Status, &agent.ConnectionState, &agent.ContainerStatus, &agent.SessionStatus, &agent.RuntimeState,
-			&agent.Image, &agent.Detached, &agent.Runtime, &runtimeHostID, &agent.WebPTYEnabled, &agent.TaskSummary, &message,
+			&agent.Image, &agent.Detached, &agent.Runtime, &runtimeBrokerID, &agent.WebPTYEnabled, &agent.TaskSummary, &message,
 			&appliedConfig,
 			&agent.Created, &agent.Updated, &lastSeen,
 			&agent.CreatedBy, &agent.OwnerID, &agent.Visibility, &agent.StateVersion,
@@ -745,8 +745,8 @@ func (s *SQLiteStore) ListAgents(ctx context.Context, filter store.AgentFilter, 
 		if lastSeen.Valid {
 			agent.LastSeen = lastSeen.Time
 		}
-		if runtimeHostID.Valid {
-			agent.RuntimeHostID = runtimeHostID.String
+		if runtimeBrokerID.Valid {
+			agent.RuntimeBrokerID = runtimeBrokerID.String
 		}
 		if message.Valid {
 			agent.Message = message.String
@@ -813,10 +813,10 @@ func (s *SQLiteStore) CreateGrove(ctx context.Context, grove *store.Grove) error
 	grove.Updated = now
 
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO groves (id, name, slug, git_remote, default_runtime_host_id, labels, annotations, created_at, updated_at, created_by, owner_id, visibility)
+		INSERT INTO groves (id, name, slug, git_remote, default_runtime_broker_id, labels, annotations, created_at, updated_at, created_by, owner_id, visibility)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
-		grove.ID, grove.Name, grove.Slug, nullableString(grove.GitRemote), nullableString(grove.DefaultRuntimeHostID),
+		grove.ID, grove.Name, grove.Slug, nullableString(grove.GitRemote), nullableString(grove.DefaultRuntimeBrokerID),
 		marshalJSON(grove.Labels), marshalJSON(grove.Annotations),
 		grove.Created, grove.Updated, grove.CreatedBy, grove.OwnerID, grove.Visibility,
 	)
@@ -832,13 +832,13 @@ func (s *SQLiteStore) CreateGrove(ctx context.Context, grove *store.Grove) error
 func (s *SQLiteStore) GetGrove(ctx context.Context, id string) (*store.Grove, error) {
 	grove := &store.Grove{}
 	var labels, annotations string
-	var gitRemote, defaultRuntimeHostID sql.NullString
+	var gitRemote, defaultRuntimeBrokerID sql.NullString
 
 	err := s.db.QueryRowContext(ctx, `
-		SELECT id, name, slug, git_remote, default_runtime_host_id, labels, annotations, created_at, updated_at, created_by, owner_id, visibility
+		SELECT id, name, slug, git_remote, default_runtime_broker_id, labels, annotations, created_at, updated_at, created_by, owner_id, visibility
 		FROM groves WHERE id = ?
 	`, id).Scan(
-		&grove.ID, &grove.Name, &grove.Slug, &gitRemote, &defaultRuntimeHostID,
+		&grove.ID, &grove.Name, &grove.Slug, &gitRemote, &defaultRuntimeBrokerID,
 		&labels, &annotations,
 		&grove.Created, &grove.Updated, &grove.CreatedBy, &grove.OwnerID, &grove.Visibility,
 	)
@@ -852,8 +852,8 @@ func (s *SQLiteStore) GetGrove(ctx context.Context, id string) (*store.Grove, er
 	if gitRemote.Valid {
 		grove.GitRemote = gitRemote.String
 	}
-	if defaultRuntimeHostID.Valid {
-		grove.DefaultRuntimeHostID = defaultRuntimeHostID.String
+	if defaultRuntimeBrokerID.Valid {
+		grove.DefaultRuntimeBrokerID = defaultRuntimeBrokerID.String
 	}
 	unmarshalJSON(labels, &grove.Labels)
 	unmarshalJSON(annotations, &grove.Annotations)
@@ -906,12 +906,12 @@ func (s *SQLiteStore) UpdateGrove(ctx context.Context, grove *store.Grove) error
 
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE groves SET
-			name = ?, slug = ?, git_remote = ?, default_runtime_host_id = ?,
+			name = ?, slug = ?, git_remote = ?, default_runtime_broker_id = ?,
 			labels = ?, annotations = ?,
 			updated_at = ?, owner_id = ?, visibility = ?
 		WHERE id = ?
 	`,
-		grove.Name, grove.Slug, nullableString(grove.GitRemote), nullableString(grove.DefaultRuntimeHostID),
+		grove.Name, grove.Slug, nullableString(grove.GitRemote), nullableString(grove.DefaultRuntimeBrokerID),
 		marshalJSON(grove.Labels), marshalJSON(grove.Annotations),
 		grove.Updated, grove.OwnerID, grove.Visibility,
 		grove.ID,
@@ -961,9 +961,9 @@ func (s *SQLiteStore) ListGroves(ctx context.Context, filter store.GroveFilter, 
 		conditions = append(conditions, "git_remote LIKE ?")
 		args = append(args, filter.GitRemotePrefix+"%")
 	}
-	if filter.HostID != "" {
+	if filter.BrokerID != "" {
 		conditions = append(conditions, "id IN (SELECT grove_id FROM grove_contributors WHERE host_id = ?)")
-		args = append(args, filter.HostID)
+		args = append(args, filter.BrokerID)
 	}
 	if filter.Name != "" {
 		conditions = append(conditions, "LOWER(name) = LOWER(?)")
@@ -987,7 +987,7 @@ func (s *SQLiteStore) ListGroves(ctx context.Context, filter store.GroveFilter, 
 	}
 
 	query := fmt.Sprintf(`
-		SELECT id, name, slug, git_remote, default_runtime_host_id, labels, annotations, created_at, updated_at, created_by, owner_id, visibility
+		SELECT id, name, slug, git_remote, default_runtime_broker_id, labels, annotations, created_at, updated_at, created_by, owner_id, visibility
 		FROM groves %s ORDER BY created_at DESC LIMIT ?
 	`, whereClause)
 	args = append(args, limit)
@@ -1002,10 +1002,10 @@ func (s *SQLiteStore) ListGroves(ctx context.Context, filter store.GroveFilter, 
 	for rows.Next() {
 		var grove store.Grove
 		var labels, annotations string
-		var gitRemote, defaultRuntimeHostID sql.NullString
+		var gitRemote, defaultRuntimeBrokerID sql.NullString
 
 		if err := rows.Scan(
-			&grove.ID, &grove.Name, &grove.Slug, &gitRemote, &defaultRuntimeHostID,
+			&grove.ID, &grove.Name, &grove.Slug, &gitRemote, &defaultRuntimeBrokerID,
 			&labels, &annotations,
 			&grove.Created, &grove.Updated, &grove.CreatedBy, &grove.OwnerID, &grove.Visibility,
 		); err != nil {
@@ -1015,8 +1015,8 @@ func (s *SQLiteStore) ListGroves(ctx context.Context, filter store.GroveFilter, 
 		if gitRemote.Valid {
 			grove.GitRemote = gitRemote.String
 		}
-		if defaultRuntimeHostID.Valid {
-			grove.DefaultRuntimeHostID = defaultRuntimeHostID.String
+		if defaultRuntimeBrokerID.Valid {
+			grove.DefaultRuntimeBrokerID = defaultRuntimeBrokerID.String
 		}
 		unmarshalJSON(labels, &grove.Labels)
 		unmarshalJSON(annotations, &grove.Annotations)
@@ -1035,13 +1035,13 @@ func (s *SQLiteStore) ListGroves(ctx context.Context, filter store.GroveFilter, 
 }
 
 // ============================================================================
-// RuntimeHost Operations
+// RuntimeBroker Operations
 // ============================================================================
 
-func (s *SQLiteStore) CreateRuntimeHost(ctx context.Context, host *store.RuntimeHost) error {
+func (s *SQLiteStore) CreateRuntimeBroker(ctx context.Context, broker *store.RuntimeBroker) error {
 	now := time.Now()
-	host.Created = now
-	host.Updated = now
+	broker.Created = now
+	broker.Updated = now
 
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO runtime_hosts (
@@ -1052,12 +1052,12 @@ func (s *SQLiteStore) CreateRuntimeHost(ctx context.Context, host *store.Runtime
 			created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
-		host.ID, host.Name, host.Slug, "", host.Mode, host.Version,
-		host.Status, host.ConnectionState, host.LastHeartbeat,
-		marshalJSON(host.Capabilities), "[]",
-		"{}", marshalJSON(host.Profiles),
-		marshalJSON(host.Labels), marshalJSON(host.Annotations), host.Endpoint,
-		host.Created, host.Updated,
+		broker.ID, broker.Name, broker.Slug, "", broker.Mode, broker.Version,
+		broker.Status, broker.ConnectionState, broker.LastHeartbeat,
+		marshalJSON(broker.Capabilities), "[]",
+		"{}", marshalJSON(broker.Profiles),
+		marshalJSON(broker.Labels), marshalJSON(broker.Annotations), broker.Endpoint,
+		broker.Created, broker.Updated,
 	)
 	if err != nil {
 		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
@@ -1068,8 +1068,8 @@ func (s *SQLiteStore) CreateRuntimeHost(ctx context.Context, host *store.Runtime
 	return nil
 }
 
-func (s *SQLiteStore) GetRuntimeHost(ctx context.Context, id string) (*store.RuntimeHost, error) {
-	host := &store.RuntimeHost{}
+func (s *SQLiteStore) GetRuntimeBroker(ctx context.Context, id string) (*store.RuntimeBroker, error) {
+	broker := &store.RuntimeBroker{}
 	var capabilities, profiles, labels, annotations string
 	var hostType, harnesses, resources string // unused columns kept for schema compatibility
 	var lastHeartbeat sql.NullTime
@@ -1082,11 +1082,11 @@ func (s *SQLiteStore) GetRuntimeHost(ctx context.Context, id string) (*store.Run
 			created_at, updated_at
 		FROM runtime_hosts WHERE id = ?
 	`, id).Scan(
-		&host.ID, &host.Name, &host.Slug, &hostType, &host.Mode, &host.Version,
-		&host.Status, &host.ConnectionState, &lastHeartbeat,
+		&broker.ID, &broker.Name, &broker.Slug, &hostType, &broker.Mode, &broker.Version,
+		&broker.Status, &broker.ConnectionState, &lastHeartbeat,
 		&capabilities, &harnesses, &resources, &profiles,
-		&labels, &annotations, &host.Endpoint,
-		&host.Created, &host.Updated,
+		&labels, &annotations, &broker.Endpoint,
+		&broker.Created, &broker.Updated,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -1096,17 +1096,17 @@ func (s *SQLiteStore) GetRuntimeHost(ctx context.Context, id string) (*store.Run
 	}
 
 	if lastHeartbeat.Valid {
-		host.LastHeartbeat = lastHeartbeat.Time
+		broker.LastHeartbeat = lastHeartbeat.Time
 	}
-	unmarshalJSON(capabilities, &host.Capabilities)
-	unmarshalJSON(profiles, &host.Profiles)
-	unmarshalJSON(labels, &host.Labels)
-	unmarshalJSON(annotations, &host.Annotations)
+	unmarshalJSON(capabilities, &broker.Capabilities)
+	unmarshalJSON(profiles, &broker.Profiles)
+	unmarshalJSON(labels, &broker.Labels)
+	unmarshalJSON(annotations, &broker.Annotations)
 
-	return host, nil
+	return broker, nil
 }
 
-func (s *SQLiteStore) GetRuntimeHostByName(ctx context.Context, name string) (*store.RuntimeHost, error) {
+func (s *SQLiteStore) GetRuntimeBrokerByName(ctx context.Context, name string) (*store.RuntimeBroker, error) {
 	var id string
 	err := s.db.QueryRowContext(ctx, "SELECT id FROM runtime_hosts WHERE LOWER(name) = LOWER(?)", name).Scan(&id)
 	if err != nil {
@@ -1115,11 +1115,11 @@ func (s *SQLiteStore) GetRuntimeHostByName(ctx context.Context, name string) (*s
 		}
 		return nil, err
 	}
-	return s.GetRuntimeHost(ctx, id)
+	return s.GetRuntimeBroker(ctx, id)
 }
 
-func (s *SQLiteStore) UpdateRuntimeHost(ctx context.Context, host *store.RuntimeHost) error {
-	host.Updated = time.Now()
+func (s *SQLiteStore) UpdateRuntimeBroker(ctx context.Context, broker *store.RuntimeBroker) error {
+	broker.Updated = time.Now()
 
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE runtime_hosts SET
@@ -1130,13 +1130,13 @@ func (s *SQLiteStore) UpdateRuntimeHost(ctx context.Context, host *store.Runtime
 			updated_at = ?
 		WHERE id = ?
 	`,
-		host.Name, host.Slug, "", host.Mode, host.Version,
-		host.Status, host.ConnectionState, host.LastHeartbeat,
-		marshalJSON(host.Capabilities), "[]",
-		"{}", marshalJSON(host.Profiles),
-		marshalJSON(host.Labels), marshalJSON(host.Annotations), host.Endpoint,
-		host.Updated,
-		host.ID,
+		broker.Name, broker.Slug, "", broker.Mode, broker.Version,
+		broker.Status, broker.ConnectionState, broker.LastHeartbeat,
+		marshalJSON(broker.Capabilities), "[]",
+		"{}", marshalJSON(broker.Profiles),
+		marshalJSON(broker.Labels), marshalJSON(broker.Annotations), broker.Endpoint,
+		broker.Updated,
+		broker.ID,
 	)
 	if err != nil {
 		return err
@@ -1152,7 +1152,7 @@ func (s *SQLiteStore) UpdateRuntimeHost(ctx context.Context, host *store.Runtime
 	return nil
 }
 
-func (s *SQLiteStore) DeleteRuntimeHost(ctx context.Context, id string) error {
+func (s *SQLiteStore) DeleteRuntimeBroker(ctx context.Context, id string) error {
 	result, err := s.db.ExecContext(ctx, "DELETE FROM runtime_hosts WHERE id = ?", id)
 	if err != nil {
 		return err
@@ -1167,7 +1167,7 @@ func (s *SQLiteStore) DeleteRuntimeHost(ctx context.Context, id string) error {
 	return nil
 }
 
-func (s *SQLiteStore) ListRuntimeHosts(ctx context.Context, filter store.RuntimeHostFilter, opts store.ListOptions) (*store.ListResult[store.RuntimeHost], error) {
+func (s *SQLiteStore) ListRuntimeBrokers(ctx context.Context, filter store.RuntimeBrokerFilter, opts store.ListOptions) (*store.ListResult[store.RuntimeBroker], error) {
 	var conditions []string
 	var args []interface{}
 
@@ -1216,41 +1216,41 @@ func (s *SQLiteStore) ListRuntimeHosts(ctx context.Context, filter store.Runtime
 	}
 	defer rows.Close()
 
-	var hosts []store.RuntimeHost
+	var hosts []store.RuntimeBroker
 	for rows.Next() {
-		var host store.RuntimeHost
+		var broker store.RuntimeBroker
 		var capabilities, profiles, labels, annotations string
 		var hostType, harnesses, resources string // unused columns kept for schema compatibility
 		var lastHeartbeat sql.NullTime
 
 		if err := rows.Scan(
-			&host.ID, &host.Name, &host.Slug, &hostType, &host.Mode, &host.Version,
-			&host.Status, &host.ConnectionState, &lastHeartbeat,
+			&broker.ID, &broker.Name, &broker.Slug, &hostType, &broker.Mode, &broker.Version,
+			&broker.Status, &broker.ConnectionState, &lastHeartbeat,
 			&capabilities, &harnesses, &resources, &profiles,
-			&labels, &annotations, &host.Endpoint,
-			&host.Created, &host.Updated,
+			&labels, &annotations, &broker.Endpoint,
+			&broker.Created, &broker.Updated,
 		); err != nil {
 			return nil, err
 		}
 
 		if lastHeartbeat.Valid {
-			host.LastHeartbeat = lastHeartbeat.Time
+			broker.LastHeartbeat = lastHeartbeat.Time
 		}
-		unmarshalJSON(capabilities, &host.Capabilities)
-		unmarshalJSON(profiles, &host.Profiles)
-		unmarshalJSON(labels, &host.Labels)
-		unmarshalJSON(annotations, &host.Annotations)
+		unmarshalJSON(capabilities, &broker.Capabilities)
+		unmarshalJSON(profiles, &broker.Profiles)
+		unmarshalJSON(labels, &broker.Labels)
+		unmarshalJSON(annotations, &broker.Annotations)
 
-		hosts = append(hosts, host)
+		hosts = append(hosts, broker)
 	}
 
-	return &store.ListResult[store.RuntimeHost]{
+	return &store.ListResult[store.RuntimeBroker]{
 		Items:      hosts,
 		TotalCount: totalCount,
 	}, nil
 }
 
-func (s *SQLiteStore) UpdateRuntimeHostHeartbeat(ctx context.Context, id string, status string) error {
+func (s *SQLiteStore) UpdateRuntimeBrokerHeartbeat(ctx context.Context, id string, status string) error {
 	now := time.Now()
 
 	result, err := s.db.ExecContext(ctx, `
@@ -1788,14 +1788,14 @@ func (s *SQLiteStore) AddGroveContributor(ctx context.Context, contrib *store.Gr
 		INSERT OR REPLACE INTO grove_contributors (grove_id, host_id, host_name, local_path, mode, status, profiles, last_seen)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`,
-		contrib.GroveID, contrib.HostID, contrib.HostName, contrib.LocalPath, contrib.Mode, contrib.Status,
+		contrib.GroveID, contrib.BrokerID, contrib.BrokerName, contrib.LocalPath, contrib.Mode, contrib.Status,
 		"[]", contrib.LastSeen, // profiles column kept for schema compat but no longer used
 	)
 	return err
 }
 
-func (s *SQLiteStore) RemoveGroveContributor(ctx context.Context, groveID, hostID string) error {
-	result, err := s.db.ExecContext(ctx, "DELETE FROM grove_contributors WHERE grove_id = ? AND host_id = ?", groveID, hostID)
+func (s *SQLiteStore) RemoveGroveContributor(ctx context.Context, groveID, brokerID string) error {
+	result, err := s.db.ExecContext(ctx, "DELETE FROM grove_contributors WHERE grove_id = ? AND host_id = ?", groveID, brokerID)
 	if err != nil {
 		return err
 	}
@@ -1809,7 +1809,7 @@ func (s *SQLiteStore) RemoveGroveContributor(ctx context.Context, groveID, hostI
 	return nil
 }
 
-func (s *SQLiteStore) GetGroveContributor(ctx context.Context, groveID, hostID string) (*store.GroveContributor, error) {
+func (s *SQLiteStore) GetGroveContributor(ctx context.Context, groveID, brokerID string) (*store.GroveContributor, error) {
 	var contrib store.GroveContributor
 	var localPath sql.NullString
 	var profiles string // unused column kept for schema compat
@@ -1818,8 +1818,8 @@ func (s *SQLiteStore) GetGroveContributor(ctx context.Context, groveID, hostID s
 	err := s.db.QueryRowContext(ctx, `
 		SELECT grove_id, host_id, host_name, local_path, mode, status, profiles, last_seen
 		FROM grove_contributors WHERE grove_id = ? AND host_id = ?
-	`, groveID, hostID).Scan(
-		&contrib.GroveID, &contrib.HostID, &contrib.HostName, &localPath, &contrib.Mode, &contrib.Status,
+	`, groveID, brokerID).Scan(
+		&contrib.GroveID, &contrib.BrokerID, &contrib.BrokerName, &localPath, &contrib.Mode, &contrib.Status,
 		&profiles, &lastSeen,
 	)
 	if err != nil {
@@ -1835,7 +1835,7 @@ func (s *SQLiteStore) GetGroveContributor(ctx context.Context, groveID, hostID s
 	if lastSeen.Valid {
 		contrib.LastSeen = lastSeen.Time
 	}
-	// profiles column no longer used - lookup from RuntimeHost.Profiles instead
+	// profiles column no longer used - lookup from RuntimeBroker.Profiles instead
 
 	return &contrib, nil
 }
@@ -1858,7 +1858,7 @@ func (s *SQLiteStore) GetGroveContributors(ctx context.Context, groveID string) 
 		var lastSeen sql.NullTime
 
 		if err := rows.Scan(
-			&contrib.GroveID, &contrib.HostID, &contrib.HostName, &localPath, &contrib.Mode, &contrib.Status,
+			&contrib.GroveID, &contrib.BrokerID, &contrib.BrokerName, &localPath, &contrib.Mode, &contrib.Status,
 			&profiles, &lastSeen,
 		); err != nil {
 			return nil, err
@@ -1870,7 +1870,7 @@ func (s *SQLiteStore) GetGroveContributors(ctx context.Context, groveID string) 
 		if lastSeen.Valid {
 			contrib.LastSeen = lastSeen.Time
 		}
-		// profiles column no longer used - lookup from RuntimeHost.Profiles instead
+		// profiles column no longer used - lookup from RuntimeBroker.Profiles instead
 
 		contributors = append(contributors, contrib)
 	}
@@ -1878,11 +1878,11 @@ func (s *SQLiteStore) GetGroveContributors(ctx context.Context, groveID string) 
 	return contributors, nil
 }
 
-func (s *SQLiteStore) GetHostGroves(ctx context.Context, hostID string) ([]store.GroveContributor, error) {
+func (s *SQLiteStore) GetHostGroves(ctx context.Context, brokerID string) ([]store.GroveContributor, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT grove_id, host_id, host_name, local_path, mode, status, profiles, last_seen
 		FROM grove_contributors WHERE host_id = ?
-	`, hostID)
+	`, brokerID)
 	if err != nil {
 		return nil, err
 	}
@@ -1896,7 +1896,7 @@ func (s *SQLiteStore) GetHostGroves(ctx context.Context, hostID string) ([]store
 		var lastSeen sql.NullTime
 
 		if err := rows.Scan(
-			&contrib.GroveID, &contrib.HostID, &contrib.HostName, &localPath, &contrib.Mode, &contrib.Status,
+			&contrib.GroveID, &contrib.BrokerID, &contrib.BrokerName, &localPath, &contrib.Mode, &contrib.Status,
 			&profiles, &lastSeen,
 		); err != nil {
 			return nil, err
@@ -1908,7 +1908,7 @@ func (s *SQLiteStore) GetHostGroves(ctx context.Context, hostID string) ([]store
 		if lastSeen.Valid {
 			contrib.LastSeen = lastSeen.Time
 		}
-		// profiles column no longer used - lookup from RuntimeHost.Profiles instead
+		// profiles column no longer used - lookup from RuntimeBroker.Profiles instead
 
 		contributors = append(contributors, contrib)
 	}
@@ -1916,12 +1916,12 @@ func (s *SQLiteStore) GetHostGroves(ctx context.Context, hostID string) ([]store
 	return contributors, nil
 }
 
-func (s *SQLiteStore) UpdateContributorStatus(ctx context.Context, groveID, hostID, status string) error {
+func (s *SQLiteStore) UpdateContributorStatus(ctx context.Context, groveID, brokerID, status string) error {
 	now := time.Now()
 
 	result, err := s.db.ExecContext(ctx, `
 		UPDATE grove_contributors SET status = ?, last_seen = ? WHERE grove_id = ? AND host_id = ?
-	`, status, now, groveID, hostID)
+	`, status, now, groveID, brokerID)
 	if err != nil {
 		return err
 	}
