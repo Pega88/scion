@@ -46,6 +46,18 @@ A registered user account with identity and credentials.
 }
 ```
 
+**User Role vs Group Permissions:**
+
+The `User.role` field represents the user's *system-level role* within the Hub itself, distinct from group-based permissions:
+
+| User Role | Purpose | Permissions Granted |
+|-----------|---------|---------------------|
+| `admin` | Hub administrators | Bypass permission checks; full access to all resources and Hub configuration |
+| `member` | Standard users | Subject to policy-based permissions; can create resources and be granted access via policies |
+| `viewer` | Read-only users | Cannot create resources; can only access resources explicitly shared via policies |
+
+**Key distinction:** `User.role` determines the user's baseline capabilities and whether they bypass the policy engine entirely (`admin`). Group-based permissions (via policies) layer on top of the baseline for `member` and `viewer` roles.
+
 #### Group
 
 A collection of principals (users and/or other groups).
@@ -58,7 +70,6 @@ A collection of principals (users and/or other groups).
   "name": "platform-team",
   "slug": "platform-team",
   "description": "Platform engineering team",
-  "parentId": "engineering-group-uuid",  // Optional: for group hierarchy
   "members": [
     {"type": "user", "id": "user-uuid-1"},
     {"type": "user", "id": "user-uuid-2"},
@@ -67,36 +78,57 @@ A collection of principals (users and/or other groups).
 }
 ```
 
-**Group Hierarchy:**
-Groups can contain other groups, forming a hierarchy:
+**Group Membership (Transitive Containment):**
+
+Groups can contain other groups as members, creating transitive membership:
 
 ```
 engineering (group)
-├── platform-team (group)
+├── platform-team (group)   ← member of engineering
 │   ├── alice (user)
 │   └── bob (user)
 ├── frontend-team (group)
 │   └── charlie (user)
 └── devops (group)
-    ├── platform-team (group)  ← nested reference
+    ├── platform-team (group)  ← platform-team is also member of devops
     └── dave (user)
 ```
 
+In this example:
+- Alice and Bob are direct members of `platform-team`
+- Alice and Bob are also *transitive* members of both `engineering` and `devops` (via `platform-team`)
+- If a policy grants access to `engineering`, all of: alice, bob, charlie, dave, and all members of platform-team, frontend-team, and devops have access
 
-A user gains access to resources through policies attached to those resources (or their containing scopes). When a policy lists a group as a member, all users in that group (directly or transitively) are granted the policy's permissions.
+**Membership Resolution:**
+
+When checking if a user has access through a group, the system performs upward traversal:
+1. Find all groups the user belongs to directly
+2. Recursively find all groups that contain those groups
+3. The user's "effective groups" is the union of all groups found
+
+A user gains access to resources through policies attached to those resources (or their containing scopes). When a policy lists a group as a principal, all users in that group (directly or transitively) are granted the policy's permissions.
 
 ### 2.2 Resources
 
 Resources are the objects that policies protect. The key resources are:
 
-| Resource Type | Description | Containment Scope |
-|---------------|-------------|-------------------|
-| `hub` | The Hub itself (singleton) | - (root) |
-| `grove` | A project/workspace | Hub |
-| `agent` | An agent instance | Grove |
-| `template` | An agent template | Hub or Grove |
-| `user` | A user account | Hub |
-| `group` | A user group | Hub |
+| Resource Type | Description | Containment Scope | Owner Field |
+|---------------|-------------|-------------------|-------------|
+| `hub` | The Hub itself (singleton) | - (root) | N/A |
+| `grove` | A project/workspace | Hub | `ownerId` |
+| `agent` | An agent instance | Grove | `ownerId` |
+| `template` | An agent template | Hub or Grove | `ownerId` |
+| `user` | A user account | Hub | Self |
+| `group` | A user group | Hub | `ownerId` |
+
+**Resource Ownership:**
+
+Each resource has an `ownerId` field indicating the user who owns it. Ownership provides:
+- Implicit full access to the resource (owner bypass)
+- The ability to transfer ownership via the `update` action
+- The ability to attach policies to the resource
+
+**Ownership Transfer:** A user with the `update` action on a resource can modify the `ownerId` field to transfer ownership. The new owner must be an active user in the Hub.
 
 > **Decision: User-Scoped Templates**
 >
@@ -145,6 +177,15 @@ Actions represent operations that can be performed on resources. The system uses
 | `list` | List resources in scope | Container resources |
 | `manage` | Administrative operations | Hub, Grove |
 
+**`manage` Action Details:**
+
+The `manage` action grants administrative capabilities beyond standard CRUD:
+
+| Resource | `manage` Grants |
+|----------|-----------------|
+| Hub | Modify Hub settings, view all resources, manage default policies |
+| Grove | Modify grove settings, manage grove-level policies, set default runtime broker |
+
 **Extended Actions** (resource-specific):
 
 | Resource | Action | Description |
@@ -156,6 +197,10 @@ Actions represent operations that can be performed on resources. The system uses
 | Grove | `register` | Register grove with Hub |
 | Group | `add_member` | Add member to group |
 | Group | `remove_member` | Remove member from group |
+
+**Wildcard Actions:**
+
+Policies can specify `["*"]` for actions to grant all actions applicable to the resource type. When new actions are added to a resource type, existing wildcard policies automatically include them.
 
 ### 2.5 Policies
 
@@ -181,11 +226,17 @@ See [Section 4.3 Policy Data Model](#43-policy) for the detailed schema.
 
   "effect": "allow",              // "allow" or "deny"
 
+  "priority": 0,                  // See Section 3.5
+
   "conditions": {                 // Optional conditions
     "labels": {"environment": "production"}
   }
 }
 ```
+
+**Wildcard Resource Types:**
+
+Setting `resourceType: "*"` means the policy applies to all resource types within the scope. This is commonly used for administrative policies.
 
 Principals are bound to policies via `PolicyBinding` records (see [Section 4.4](#44-policybinding)).
 
@@ -233,7 +284,22 @@ This means:
 func resolveAccess(ctx context.Context, principal Principal, resource Resource, action Action) Decision {
     log := authzLogger(ctx)
 
-    // Step 1: Expand principal's effective groups (flatten hierarchy)
+    // Step 0: Check for admin bypass
+    if principal.Role == "admin" {
+        log.Debug("admin bypass",
+            "principal", principal.ID)
+        return Decision{Allowed: true, Reason: "admin_role"}
+    }
+
+    // Step 1: Check resource ownership
+    if resource.OwnerID == principal.ID {
+        log.Debug("owner bypass",
+            "principal", principal.ID,
+            "resource", resource.ID)
+        return Decision{Allowed: true, Reason: "owner"}
+    }
+
+    // Step 2: Expand principal's effective groups (flatten hierarchy)
     effectiveGroups := expandGroups(ctx, principal)
     allPrincipals := append([]Principal{principal}, effectiveGroups...)
 
@@ -243,27 +309,36 @@ func resolveAccess(ctx context.Context, principal Principal, resource Resource, 
         "action", action,
         "effectiveGroups", len(effectiveGroups))
 
-    // Step 2: Collect policies at each scope level
+    // Step 3: Collect policies at each scope level
     scopes := getResourceScopes(resource) // e.g., [hub, grove, agent]
 
     var resolvedDecision *Decision = nil
 
     for _, scope := range scopes {
+        // Get policies for this scope, sorted by priority ascending
         policies := getPoliciesForScope(ctx, scope, allPrincipals)
+        sort.Slice(policies, func(i, j int) bool {
+            return policies[i].Priority < policies[j].Priority
+        })
 
         for _, policy := range policies {
             if matchesResource(policy, resource) && matchesAction(policy, action) {
-                decision := evaluatePolicy(policy, ctx)
+                if !evaluateConditions(policy.Conditions, ctx, resource) {
+                    log.Debug("policy conditions not met",
+                        "policy", policy.ID)
+                    continue
+                }
 
                 log.Debug("policy matched",
                     "policy", policy.ID,
                     "scope", scope,
                     "effect", policy.Effect,
-                    "decision", decision)
+                    "priority", policy.Priority)
 
                 // Future: hard_deny check would go here (see Section 3.4)
 
-                // Lower level overrides higher level
+                // Higher priority within same scope overrides lower priority
+                // Lower scope level overrides higher scope level
                 resolvedDecision = &Decision{
                     Allowed: policy.Effect == "allow",
                     Reason:  policy.Effect,
@@ -274,7 +349,7 @@ func resolveAccess(ctx context.Context, principal Principal, resource Resource, 
         }
     }
 
-    // Step 3: Apply default (deny if no policy matched)
+    // Step 4: Apply default (deny if no policy matched)
     if resolvedDecision == nil {
         log.Debug("no matching policy, applying default deny",
             "principal", principal.ID,
@@ -306,6 +381,28 @@ func resolveAccess(ctx context.Context, principal Principal, resource Resource, 
 >
 > A `hard_deny` effect could provide Hub admins a mechanism to enforce restrictions that grove owners cannot override. This is documented in [Section 12.1](#121-policy-resolution-override-vs-least-privilege) as a potential future refinement. For initial implementation, the override model with standard `deny` is sufficient.
 
+### 3.5 Priority Within Same Scope
+
+When multiple policies match at the same scope level (e.g., two grove-level policies), they are evaluated in order of their `priority` field (ascending). Higher priority values are evaluated last and take precedence.
+
+**Example:**
+```
+Grove-level policies for agent access:
+- Policy A: priority=0, effect=allow, actions=[read]
+- Policy B: priority=10, effect=deny, actions=[read, delete]
+- Policy C: priority=20, effect=allow, actions=[delete]
+
+Result for "read" action: deny (Policy B overrides Policy A)
+Result for "delete" action: allow (Policy C overrides Policy B)
+Result for "update" action: no match (default deny)
+```
+
+**Priority Guidelines:**
+- `0-9`: Base policies (default grants)
+- `10-49`: Standard policies
+- `50-89`: Override policies
+- `90-99`: Emergency/exception policies
+
 ---
 
 ## 4. Data Models
@@ -322,9 +419,6 @@ type Group struct {
     Name        string `json:"name"`        // Human-friendly name
     Slug        string `json:"slug"`        // URL-safe identifier
     Description string `json:"description,omitempty"`
-
-    // Hierarchy
-    ParentID string `json:"parentId,omitempty"` // Parent group (for hierarchy)
 
     // Metadata
     Labels      map[string]string `json:"labels,omitempty"`
@@ -360,6 +454,16 @@ const (
 )
 ```
 
+**GroupMember Role:**
+
+The `Role` field in `GroupMember` represents the member's role *within the group*, not their permissions:
+
+| Role | Capabilities |
+|------|--------------|
+| `member` | Standard membership; gains access through group's policies |
+| `admin` | Can add/remove members and modify group metadata |
+| `owner` | Full control; can delete group and transfer ownership |
+
 ### 4.3 Policy
 
 ```go
@@ -377,7 +481,7 @@ type Policy struct {
     // What the policy applies to
     ResourceType string   `json:"resourceType"` // "agent", "grove", "template", etc. or "*" for all
     ResourceID   string   `json:"resourceId,omitempty"` // Specific resource (optional)
-    Actions      []string `json:"actions"`      // ["create", "read", "update", "delete", ...]
+    Actions      []string `json:"actions"`      // ["create", "read", "update", "delete", ...] or ["*"]
 
     // Effect
     Effect string `json:"effect"` // "allow", "deny" (future: "hard_deny")
@@ -411,9 +515,12 @@ This model supports many principals having access to the same resource through a
 // PolicyBinding links principals to a policy.
 // The policy itself is attached to a resource/scope via its ScopeType and ScopeID fields.
 type PolicyBinding struct {
-    PolicyID      string `json:"policyId"`      // FK to Policy.ID
-    PrincipalType string `json:"principalType"` // "user" or "group"
-    PrincipalID   string `json:"principalId"`   // FK to User.ID or Group.ID
+    ID            string    `json:"id"`            // UUID primary key
+    PolicyID      string    `json:"policyId"`      // FK to Policy.ID
+    PrincipalType string    `json:"principalType"` // "user" or "group"
+    PrincipalID   string    `json:"principalId"`   // FK to User.ID or Group.ID
+    Created       time.Time `json:"created"`
+    CreatedBy     string    `json:"createdBy,omitempty"`
 }
 ```
 
@@ -427,7 +534,7 @@ type PolicyBinding struct {
 ```go
 // PolicyConditions defines optional conditions for policy matching.
 type PolicyConditions struct {
-    // Label matching
+    // Label matching (all labels must match - AND semantics)
     Labels map[string]string `json:"labels,omitempty"`
 
     // Time-based conditions
@@ -438,6 +545,32 @@ type PolicyConditions struct {
     SourceIPs []string `json:"sourceIps,omitempty"`
 }
 ```
+
+**Label Matching Semantics:**
+
+- **AND logic**: All specified labels must match for the condition to be true
+- **Exact match**: Label values must match exactly (case-sensitive)
+- **Missing label**: If a resource lacks a required label, the condition fails
+
+**Example:**
+```json
+{
+  "conditions": {
+    "labels": {
+      "environment": "production",
+      "team": "platform"
+    }
+  }
+}
+```
+This policy only matches resources where *both* `environment=production` AND `team=platform`.
+
+**Time-Based Condition Evaluation:**
+
+- `validFrom`: Policy only applies after this time (inclusive)
+- `validUntil`: Policy only applies before this time (inclusive)
+- Both can be specified to create a time window
+- If the current time is outside the window, the policy is skipped (not matched)
 
 ---
 
@@ -472,19 +605,18 @@ func (Group) Fields() []ent.Field {
 // Edges of the Group.
 func (Group) Edges() []ent.Edge {
     return []ent.Edge{
-        // Parent group (hierarchical relationship)
-        edge.To("parent", Group.Type).Unique(),
-        edge.From("children", Group.Type).Ref("parent"),
-
-        // Member users
+        // Member users (users directly in this group)
         edge.To("users", User.Type),
 
-        // Member groups (groups within this group)
+        // Member groups (groups contained within this group)
         edge.To("member_groups", Group.Type),
         edge.From("parent_groups", Group.Type).Ref("member_groups"),
 
-        // Policies attached to this group
+        // Policies attached to this group as principal
         edge.From("policies", Policy.Type).Ref("principals_groups"),
+
+        // Owner relationship
+        edge.To("owner", User.Type).Unique(),
     }
 }
 ```
@@ -550,6 +682,9 @@ func (User) Edges() []ent.Edge {
 
         // Policies attached to this user
         edge.From("policies", Policy.Type).Ref("principals_users"),
+
+        // Groups owned by this user
+        edge.From("owned_groups", Group.Type).Ref("owner"),
     }
 }
 ```
@@ -568,8 +703,8 @@ GET /api/v1/groups
 **Query Parameters:**
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `parentId` | string | Filter by parent group |
-| `memberId` | string | Filter groups containing this member |
+| `memberId` | string | Filter groups containing this member (direct or transitive) |
+| `ownerId` | string | Filter groups owned by this user |
 | `limit` | int | Maximum results |
 | `cursor` | string | Pagination cursor |
 
@@ -588,25 +723,40 @@ POST /api/v1/groups
 {
   "name": "Platform Team",
   "slug": "platform-team",
-  "description": "Platform engineering team",
-  "parentId": "engineering-uuid"
+  "description": "Platform engineering team"
 }
 ```
+
+**Authorization:** Requires `create` action on `group` resource type at hub scope.
 
 #### Update Group
 ```
 PATCH /api/v1/groups/{groupId}
 ```
 
+**Authorization:** Requires `update` action on the group, or `admin` role within the group.
+
 #### Delete Group
 ```
 DELETE /api/v1/groups/{groupId}
 ```
 
+**Query Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `cascade` | bool | Delete associated policy bindings (default: false, returns error if bindings exist) |
+
+**Authorization:** Requires group owner or Hub admin.
+
 #### List Group Members
 ```
 GET /api/v1/groups/{groupId}/members
 ```
+
+**Query Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `expand` | bool | Include transitive members (default: false) |
 
 #### Add Group Member
 ```
@@ -622,10 +772,14 @@ POST /api/v1/groups/{groupId}/members
 }
 ```
 
+**Authorization:** Requires `add_member` action on the group, or `admin` role within the group.
+
 #### Remove Group Member
 ```
 DELETE /api/v1/groups/{groupId}/members/{memberType}/{memberId}
 ```
+
+**Authorization:** Requires `remove_member` action on the group, or `admin` role within the group.
 
 ### 6.2 Policy Endpoints
 
@@ -641,6 +795,8 @@ GET /api/v1/policies
 | `scopeId` | string | Filter by scope ID |
 | `resourceType` | string | Filter by resource type |
 | `principalId` | string | Filter policies affecting this principal |
+
+**Authorization:** Returns only policies the caller can view (based on scope access).
 
 #### Get Policy
 ```
@@ -662,20 +818,45 @@ POST /api/v1/policies
   "resourceType": "*",
   "actions": ["create", "read", "update", "delete", "manage"],
   "effect": "allow",
+  "priority": 10,
   "principals": [
     {"type": "group", "id": "platform-team-uuid"}
   ]
 }
 ```
 
+**Authorization:** Requires `manage` action on the scope (hub or grove).
+
 #### Update Policy
 ```
 PATCH /api/v1/policies/{policyId}
 ```
 
+**Authorization:** Requires `manage` action on the policy's scope.
+
 #### Delete Policy
 ```
 DELETE /api/v1/policies/{policyId}
+```
+
+**Authorization:** Requires `manage` action on the policy's scope.
+
+#### Add Principal to Policy
+```
+POST /api/v1/policies/{policyId}/principals
+```
+
+**Request Body:**
+```json
+{
+  "principalType": "user",
+  "principalId": "user-uuid"
+}
+```
+
+#### Remove Principal from Policy
+```
+DELETE /api/v1/policies/{policyId}/principals/{principalType}/{principalId}
 ```
 
 #### Evaluate Access (Debug/Test)
@@ -713,6 +894,8 @@ POST /api/v1/policies/evaluate
 }
 ```
 
+**Authorization:** Hub admins only, or caller must be the evaluated principal.
+
 ---
 
 ## 7. Resource-Scoped Policy Attachment
@@ -727,6 +910,8 @@ POST /api/v1/groves/{groveId}/policies
 DELETE /api/v1/groves/{groveId}/policies/{policyId}
 ```
 
+**Authorization:** Requires `manage` action on the grove.
+
 ### 7.2 Hub-Level Policies
 
 Hub-level policies apply globally:
@@ -737,6 +922,8 @@ POST /api/v1/hub/policies
 DELETE /api/v1/hub/policies/{policyId}
 ```
 
+**Authorization:** Hub admins only.
+
 ### 7.3 Resource-Specific Policies
 
 Policies can be attached to specific resources:
@@ -746,6 +933,8 @@ GET /api/v1/agents/{agentId}/policies
 POST /api/v1/agents/{agentId}/policies
 DELETE /api/v1/agents/{agentId}/policies/{policyId}
 ```
+
+**Authorization:** Requires resource ownership or `manage` action on the containing grove.
 
 ---
 
@@ -777,6 +966,7 @@ var defaultPolicies = []Policy{
         ResourceType: "*",
         Actions:      []string{"*"},
         Effect:       "allow",
+        Priority:     0,
         // Bound to group: hub-admins
     },
     {
@@ -786,22 +976,29 @@ var defaultPolicies = []Policy{
         ResourceType: "grove",
         Actions:      []string{"create"},
         Effect:       "allow",
+        Priority:     0,
         // Bound to group: hub-members
     },
     {
-        Name:         "resource-owner-full-access",
-        Description:  "Resource owners have full access to their resources",
+        Name:         "hub-member-create-groups",
+        Description:  "Hub members can create groups",
         ScopeType:    "hub",
-        ResourceType: "*",
-        Actions:      []string{"*"},
+        ResourceType: "group",
+        Actions:      []string{"create"},
         Effect:       "allow",
-        Conditions: &PolicyConditions{
-            // Special condition: principal.id == resource.ownerId
-            // Implemented in code, not as label match
-        },
+        Priority:     0,
+        // Bound to group: hub-members
     },
 }
 ```
+
+### 8.3 Owner Bypass
+
+Resource ownership provides implicit full access. This is **not** implemented as a policy but as a check in the resolution algorithm (see Section 3.3, Step 1). The owner bypass:
+
+- Applies before any policy evaluation
+- Cannot be overridden by deny policies
+- Grants all actions on the owned resource
 
 ---
 
@@ -901,12 +1098,12 @@ func extractResourceAndAction(r *http.Request) (Resource, Action) {
     for i := 0; i < len(parts); i++ {
         switch parts[i] {
         case "groves":
-            if i+1 < len(parts) && parts[i+1] != "register" {
+            if i+1 < len(parts) && !isAction(parts[i+1]) {
                 resource = Resource{Type: "grove", ID: parts[i+1]}
                 i++
             }
         case "agents":
-            if i+1 < len(parts) {
+            if i+1 < len(parts) && !isAction(parts[i+1]) {
                 resource = Resource{Type: "agent", ID: parts[i+1], ParentType: "grove", ParentID: resource.ID}
                 i++
             } else {
@@ -914,7 +1111,37 @@ func extractResourceAndAction(r *http.Request) (Resource, Action) {
                 action = ActionList
                 resource.Type = "agent"
             }
-        // ... handle other resource types
+        case "templates":
+            if i+1 < len(parts) && !isAction(parts[i+1]) {
+                resource = Resource{Type: "template", ID: parts[i+1], ParentType: resource.Type, ParentID: resource.ID}
+                i++
+            } else {
+                action = ActionList
+                resource.Type = "template"
+            }
+        case "groups":
+            if i+1 < len(parts) && !isAction(parts[i+1]) {
+                resource = Resource{Type: "group", ID: parts[i+1]}
+                i++
+            } else {
+                action = ActionList
+                resource.Type = "group"
+            }
+        case "policies":
+            if i+1 < len(parts) && !isAction(parts[i+1]) {
+                resource = Resource{Type: "policy", ID: parts[i+1]}
+                i++
+            } else {
+                action = ActionList
+                resource.Type = "policy"
+            }
+        case "users":
+            if i+1 < len(parts) && !isAction(parts[i+1]) {
+                resource = Resource{Type: "user", ID: parts[i+1]}
+                i++
+            }
+        case "hub":
+            resource = Resource{Type: "hub", ID: "hub"}
         }
     }
 
@@ -928,10 +1155,29 @@ func extractResourceAndAction(r *http.Request) (Resource, Action) {
             action = ActionStop
         case "message":
             action = ActionMessage
+        case "attach":
+            action = ActionAttach
+        case "members":
+            if method == "POST" {
+                action = ActionAddMember
+            } else if method == "DELETE" {
+                action = ActionRemoveMember
+            }
+        case "register":
+            action = ActionRegister
         }
     }
 
     return resource, action
+}
+
+// isAction returns true if the path segment is an action, not a resource ID
+func isAction(s string) bool {
+    actions := map[string]bool{
+        "start": true, "stop": true, "message": true, "attach": true,
+        "members": true, "register": true, "policies": true, "evaluate": true,
+    }
+    return actions[s]
 }
 ```
 
@@ -1028,6 +1274,13 @@ func (s *GroupService) AddMember(ctx context.Context, groupID, memberID, memberT
     }
     // ... add member
 }
+
+// wouldCreateCycle checks if adding memberGroup to targetGroup would create a cycle
+func wouldCreateCycle(ctx context.Context, targetGroupID, memberGroupID string) bool {
+    // Traverse upward from targetGroup to see if we reach memberGroup
+    visited := make(map[string]bool)
+    return containsGroup(ctx, memberGroupID, targetGroupID, visited)
+}
 ```
 
 ### 11.2 Policy Evaluation Performance
@@ -1037,20 +1290,36 @@ Group hierarchy expansion can be expensive. Mitigations:
 1. **Cache effective groups** - Per-request cache of expanded groups
 2. **Limit hierarchy depth** - Maximum 10 levels of group nesting
 3. **Eager evaluation** - Pre-compute effective groups on login
+4. **Database indexes** - Ensure proper indexes on group membership edges
 
-### 11.3 Audit Trail
+### 11.3 Cascading Deletes
+
+When entities are deleted, dependent records must be handled:
+
+| Deleted Entity | Affected Records | Behavior |
+|----------------|------------------|----------|
+| User | PolicyBindings | Delete bindings for this user |
+| User | GroupMembers | Remove user from all groups |
+| Group | PolicyBindings | Delete bindings for this group |
+| Group | GroupMembers (as member) | Remove group from parent groups |
+| Group | GroupMembers (as container) | Delete all membership records |
+| Policy | PolicyBindings | Delete all bindings |
+| Grove | Policies (grove scope) | Delete or orphan (configurable) |
+
+### 11.4 Audit Trail
 
 All policy changes are logged:
 
 ```go
 type PolicyAuditEvent struct {
-    EventType   string    `json:"eventType"`   // created, updated, deleted
+    EventType   string    `json:"eventType"`   // created, updated, deleted, binding_added, binding_removed
     PolicyID    string    `json:"policyId"`
     PolicyName  string    `json:"policyName"`
     ChangedBy   string    `json:"changedBy"`
     ChangedAt   time.Time `json:"changedAt"`
     OldValue    *Policy   `json:"oldValue,omitempty"`
     NewValue    *Policy   `json:"newValue,omitempty"`
+    AffectedPrincipal *PrincipalRef `json:"affectedPrincipal,omitempty"`
 }
 ```
 
@@ -1137,9 +1406,138 @@ type PolicyAuditEvent struct {
 
 ---
 
-## 14. References
+## 14. Open Questions
+
+This section documents design decisions that require further input or discussion before implementation.
+
+### 14.1 Meta-Permissions: Who Can Manage Policies?
+
+**Question:** What permissions are required to create, modify, or delete policies at different scope levels?
+
+**Current Assumption:** The `manage` action on a scope grants policy management. However, this conflates administrative operations with permission management.
+
+**Options:**
+1. **`manage` includes policy management** (current) - Simple, but couples unrelated capabilities
+2. **Separate `manage_policies` action** - More granular, but adds complexity
+3. **Policy ownership model** - Policy creator can modify; scope `manage` can delete
+
+**Impact:** Determines who can grant themselves elevated access within a scope.
+
+### 14.2 Default Access for New Resources
+
+**Question:** When a new resource is created (e.g., agent, grove), what access do other users have by default?
+
+**Current Assumption:** Default deny - only the owner has access until policies are created.
+
+**Options:**
+1. **Strict default deny** - Owner only; explicit policies required for others
+2. **Inherit from scope** - New agents inherit grove-level policies automatically
+3. **Configurable default** - Grove settings define default visibility
+
+**Impact:** Affects onboarding experience and security posture.
+
+### 14.3 Template Access Across Groves
+
+**Question:** Can a grove-scoped template be used by other groves, or is it strictly contained?
+
+**Current Assumption:** Grove-scoped templates are only usable within that grove.
+
+**Options:**
+1. **Strict containment** - Grove templates only usable in that grove
+2. **Visibility-based sharing** - `visibility: public` templates usable anywhere
+3. **Explicit sharing** - Grove templates can be "shared" to other groves via policy
+
+**Impact:** Affects template reuse patterns and permission complexity.
+
+### 14.4 Viewer Role Capabilities
+
+**Question:** What exactly can a `viewer` role user do beyond reading resources?
+
+**Areas needing clarification:**
+- Can viewers create agents? (Current: no)
+- Can viewers message/attach to agents they can see? (Current: unclear)
+- Can viewers be granted elevated access via policies? (Current: yes, but is this intended?)
+
+**Impact:** Determines the minimum capability level for read-only users.
+
+### 14.5 Runtime Broker Permissions Integration
+
+**Question:** How do Runtime Broker permissions interact with user permissions?
+
+**Scenario:** A user has `delete` permission on an agent, but the Runtime Broker managing that agent does not permit Hub-initiated deletes (per broker policy).
+
+**Options:**
+1. **User permissions take precedence** - If user can delete, operation proceeds (broker must comply)
+2. **Intersection model** - Both user AND broker must permit the operation
+3. **Broker as override** - Broker restrictions cannot be bypassed by user permissions
+
+**Impact:** Critical for understanding effective permissions in distributed scenarios.
+
+### 14.6 Group Deletion with Active Policies
+
+**Question:** What happens when a group is deleted that is bound to active policies?
+
+**Current Assumption:** Returns error unless `cascade=true` is specified.
+
+**Options:**
+1. **Block deletion** - Error until all bindings are removed manually
+2. **Cascade delete bindings** - Remove bindings, keep policies (now grant no one)
+3. **Cascade delete policies** - Remove policies that would become empty
+4. **Soft delete** - Mark group as deleted, preserve bindings for audit
+
+**Impact:** Affects operational safety and audit trail preservation.
+
+### 14.7 Cross-Group Policy Inheritance
+
+**Question:** If Group A is a member of Group B, and Group B has a policy binding, does Group A automatically inherit that binding?
+
+**Current Assumption:** No - group membership for policy purposes is only evaluated at the user level (users in Group A get access if Group A is bound).
+
+**Alternative interpretation:** Group-to-group membership might imply the contained group also gets the policy.
+
+**Impact:** Affects how administrators think about policy propagation.
+
+### 14.8 Time-Based Condition Timezone Handling
+
+**Question:** What timezone is used for `validFrom` and `validUntil` condition evaluation?
+
+**Options:**
+1. **UTC only** - All times are UTC, client converts for display
+2. **User timezone** - Evaluate based on user's configured timezone
+3. **Resource timezone** - Groves/agents could have timezone settings
+
+**Impact:** Affects predictability of time-based access windows.
+
+### 14.9 Emergency Access Revocation
+
+**Question:** How can an administrator immediately revoke a user's access in an emergency?
+
+**Current options:**
+1. Set `User.status = "suspended"` - Blocks authentication
+2. Remove from all groups - Slow, may miss direct bindings
+3. Add explicit deny policies - Complex, may be overridden
+
+**Need:** A fast, atomic, un-overrideable way to revoke access.
+
+### 14.10 Policy Versioning and Rollback
+
+**Question:** Should policies support versioning for rollback purposes?
+
+**Current Assumption:** No versioning - changes are immediate and permanent (with audit trail).
+
+**Options:**
+1. **No versioning** (current) - Simple, rely on audit trail for forensics
+2. **Immutable versions** - Each change creates new version; can rollback
+3. **Draft/Published states** - Policies can be drafted and tested before activation
+
+**Impact:** Affects operational safety and change management workflows.
+
+---
+
+## 15. References
 
 - **Hosted Architecture:** `hosted-architecture.md`
 - **Hub API Specification:** `hub-api.md`
 - **Development Authentication:** `dev-auth.md`
+- **Authentication Overview:** `auth-overview.md`
 - **Ent Documentation:** https://entgo.io/
