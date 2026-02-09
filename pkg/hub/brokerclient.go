@@ -230,3 +230,26 @@ func (c *AuthenticatedBrokerClient) MessageAgent(ctx context.Context, brokerID, 
 
 	return nil
 }
+
+// CheckAgentPrompt checks if an agent has a non-empty prompt.md file on a remote runtime broker.
+func (c *AuthenticatedBrokerClient) CheckAgentPrompt(ctx context.Context, brokerID, brokerEndpoint, agentID string) (bool, error) {
+	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/has-prompt", strings.TrimSuffix(brokerEndpoint, "/"), url.PathEscape(agentID))
+
+	resp, err := c.doRequest(ctx, brokerID, http.MethodPost, endpoint, nil)
+	if err != nil {
+		return false, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return false, fmt.Errorf("runtime broker returned error %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var result HasPromptResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return false, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return result.HasPrompt, nil
+}

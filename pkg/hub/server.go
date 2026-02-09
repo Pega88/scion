@@ -116,6 +116,9 @@ type AgentDispatcher interface {
 
 	// DispatchAgentMessage sends a message to an agent on the runtime broker.
 	DispatchAgentMessage(ctx context.Context, agent *store.Agent, message string, interrupt bool) error
+
+	// DispatchCheckAgentPrompt checks if an agent has a non-empty prompt.md file.
+	DispatchCheckAgentPrompt(ctx context.Context, agent *store.Agent) (bool, error)
 }
 
 // RuntimeBrokerClient is an interface for communicating with runtime brokers over HTTP.
@@ -146,6 +149,10 @@ type RuntimeBrokerClient interface {
 	// MessageAgent sends a message to an agent on a remote runtime broker.
 	// brokerID is used for HMAC authentication lookup.
 	MessageAgent(ctx context.Context, brokerID, brokerEndpoint, agentID, message string, interrupt bool) error
+
+	// CheckAgentPrompt checks if an agent has a non-empty prompt.md file.
+	// brokerID is used for HMAC authentication lookup.
+	CheckAgentPrompt(ctx context.Context, brokerID, brokerEndpoint, agentID string) (bool, error)
 }
 
 // RemoteCreateAgentRequest is the request body for creating an agent on a remote runtime broker.

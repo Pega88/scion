@@ -238,6 +238,45 @@ func (c *HTTPRuntimeBrokerClient) MessageAgent(ctx context.Context, brokerID, br
 	return nil
 }
 
+// HasPromptResponse is the response from the has-prompt action.
+type HasPromptResponse struct {
+	HasPrompt bool `json:"hasPrompt"`
+}
+
+// CheckAgentPrompt checks if an agent has a non-empty prompt.md file.
+// Note: brokerID is unused in this unauthenticated client.
+func (c *HTTPRuntimeBrokerClient) CheckAgentPrompt(ctx context.Context, brokerID, brokerEndpoint, agentID string) (bool, error) {
+	_ = brokerID // Unused in unauthenticated client
+	endpoint := fmt.Sprintf("%s/api/v1/agents/%s/has-prompt", strings.TrimSuffix(brokerEndpoint, "/"), url.PathEscape(agentID))
+
+	if c.debug {
+		slog.Debug("Dispatcher request", "method", "POST", "endpoint", endpoint)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, nil)
+	if err != nil {
+		return false, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := c.client.Do(httpReq)
+	if err != nil {
+		return false, fmt.Errorf("failed to send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return false, fmt.Errorf("runtime broker returned error %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var result HasPromptResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return false, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return result.HasPrompt, nil
+}
+
 // AgentTokenGenerator generates JWT tokens for agents.
 type AgentTokenGenerator interface {
 	GenerateAgentToken(agentID, groveID string) (string, error)
@@ -467,4 +506,18 @@ func (d *HTTPAgentDispatcher) DispatchAgentMessage(ctx context.Context, agent *s
 	}
 
 	return d.client.MessageAgent(ctx, agent.RuntimeBrokerID, endpoint, agent.Name, message, interrupt)
+}
+
+// DispatchCheckAgentPrompt checks if an agent has a non-empty prompt.md file.
+func (d *HTTPAgentDispatcher) DispatchCheckAgentPrompt(ctx context.Context, agent *store.Agent) (bool, error) {
+	if agent.RuntimeBrokerID == "" {
+		return false, fmt.Errorf("agent has no runtime broker assigned")
+	}
+
+	endpoint, err := d.getBrokerEndpoint(ctx, agent.RuntimeBrokerID)
+	if err != nil {
+		return false, err
+	}
+
+	return d.client.CheckAgentPrompt(ctx, agent.RuntimeBrokerID, endpoint, agent.Name)
 }

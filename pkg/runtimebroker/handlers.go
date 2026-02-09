@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -451,6 +453,8 @@ func (s *Server) handleAgentAction(w http.ResponseWriter, r *http.Request, id, a
 		s.getLogs(w, r, id)
 	case "stats":
 		s.getStats(w, r, id)
+	case "has-prompt":
+		s.checkAgentPrompt(w, r, id)
 	default:
 		NotFound(w, "Action")
 	}
@@ -589,6 +593,59 @@ func (s *Server) getStats(w http.ResponseWriter, r *http.Request, id string) {
 		CPUUsagePercent:  0.0,
 		MemoryUsageBytes: 0,
 	})
+}
+
+// HasPromptResponse is the response for the has-prompt action.
+type HasPromptResponse struct {
+	HasPrompt bool `json:"hasPrompt"`
+}
+
+func (s *Server) checkAgentPrompt(w http.ResponseWriter, r *http.Request, id string) {
+	ctx := r.Context()
+
+	// Find the agent to get its grove path
+	agents, err := s.manager.List(ctx, map[string]string{"scion.agent": "true"})
+	if err != nil {
+		RuntimeError(w, "Failed to list agents: "+err.Error())
+		return
+	}
+
+	var agent *api.AgentInfo
+	for i := range agents {
+		if agents[i].Name == id || agents[i].ContainerID == id || agents[i].Slug == id {
+			agent = &agents[i]
+			break
+		}
+	}
+
+	if agent == nil {
+		NotFound(w, "Agent")
+		return
+	}
+
+	if agent.GrovePath == "" {
+		// No grove path means we can't check prompt.md
+		writeJSON(w, http.StatusOK, HasPromptResponse{HasPrompt: false})
+		return
+	}
+
+	// Check if prompt.md exists and has content
+	// Path: <grovePath>/agents/<agentName>/prompt.md
+	promptPath := filepath.Join(agent.GrovePath, "agents", agent.Name, "prompt.md")
+	content, err := os.ReadFile(promptPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			writeJSON(w, http.StatusOK, HasPromptResponse{HasPrompt: false})
+			return
+		}
+		// Log the error but return false
+		slog.Warn("Failed to read prompt.md", "path", promptPath, "error", err)
+		writeJSON(w, http.StatusOK, HasPromptResponse{HasPrompt: false})
+		return
+	}
+
+	hasPrompt := len(strings.TrimSpace(string(content))) > 0
+	writeJSON(w, http.StatusOK, HasPromptResponse{HasPrompt: hasPrompt})
 }
 
 // Helper functions

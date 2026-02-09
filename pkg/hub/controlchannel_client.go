@@ -104,6 +104,24 @@ func (c *ControlChannelBrokerClient) MessageAgent(ctx context.Context, brokerID,
 	return err
 }
 
+// CheckAgentPrompt checks if an agent has a non-empty prompt.md file via control channel.
+func (c *ControlChannelBrokerClient) CheckAgentPrompt(ctx context.Context, brokerID, brokerEndpoint, agentID string) (bool, error) {
+	_ = brokerEndpoint
+	path := fmt.Sprintf("/api/v1/agents/%s/has-prompt", agentID)
+
+	resp, err := c.doRequest(ctx, brokerID, "POST", path, "", nil)
+	if err != nil {
+		return false, err
+	}
+
+	var result HasPromptResponse
+	if err := json.Unmarshal(resp.Body, &result); err != nil {
+		return false, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return result.HasPrompt, nil
+}
+
 // doRequest tunnels an HTTP request through the control channel.
 func (c *ControlChannelBrokerClient) doRequest(ctx context.Context, brokerID, method, path, query string, body []byte) (*wsprotocol.ResponseEnvelope, error) {
 	if !c.manager.IsConnected(brokerID) {
@@ -194,4 +212,12 @@ func (c *HybridBrokerClient) MessageAgent(ctx context.Context, brokerID, brokerE
 		return c.controlChannel.MessageAgent(ctx, brokerID, brokerEndpoint, agentID, message, interrupt)
 	}
 	return c.httpClient.MessageAgent(ctx, brokerID, brokerEndpoint, agentID, message, interrupt)
+}
+
+// CheckAgentPrompt checks if an agent has a non-empty prompt.md file.
+func (c *HybridBrokerClient) CheckAgentPrompt(ctx context.Context, brokerID, brokerEndpoint, agentID string) (bool, error) {
+	if c.useControlChannel(brokerID) {
+		return c.controlChannel.CheckAgentPrompt(ctx, brokerID, brokerEndpoint, agentID)
+	}
+	return c.httpClient.CheckAgentPrompt(ctx, brokerID, brokerEndpoint, agentID)
 }
