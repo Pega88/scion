@@ -27,9 +27,11 @@ import (
 	"github.com/ptone/scion-agent/pkg/api"
 	"github.com/ptone/scion-agent/pkg/apiclient"
 	"github.com/ptone/scion-agent/pkg/config"
+	"github.com/ptone/scion-agent/pkg/credentials"
 	"github.com/ptone/scion-agent/pkg/hubclient"
 	"github.com/ptone/scion-agent/pkg/hubsync"
 	"github.com/ptone/scion-agent/pkg/util"
+	"github.com/ptone/scion-agent/pkg/wsclient"
 	"github.com/spf13/cobra"
 )
 
@@ -324,11 +326,6 @@ func RunAgent(cmd *cobra.Command, args []string, resume bool) error {
 func startAgentViaHub(hubCtx *HubContext, agentName, task string, resume bool) error {
 	PrintUsingHub(hubCtx.Endpoint)
 
-	// If attach is requested, we can't do that via Hub yet
-	if attach {
-		return fmt.Errorf("attach mode is not yet supported when using Hub integration\n\nTo attach locally, use: scion --no-hub start -a %s", agentName)
-	}
-
 	// Get the grove ID for this project
 	groveID, err := GetGroveID(hubCtx)
 	if err != nil {
@@ -405,7 +402,62 @@ func startAgentViaHub(hubCtx *HubContext, agentName, task string, resume bool) e
 		fmt.Printf("Warning: %s\n", w)
 	}
 
-	return nil
+	if !attach {
+		return nil
+	}
+
+	// Attach mode: wait for agent to be running, then attach via WebSocket
+	agentID := ""
+	if resp.Agent != nil {
+		agentID = resp.Agent.ID
+	}
+	if agentID == "" {
+		agentID = agentName
+	}
+
+	// Poll until the agent is running
+	fmt.Printf("Waiting for agent '%s' to be ready...\n", agentName)
+	pollCtx, pollCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer pollCancel()
+
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-pollCtx.Done():
+			return fmt.Errorf("timed out waiting for agent '%s' to become ready", agentName)
+		case <-ticker.C:
+			agent, err := hubCtx.Client.GroveAgents(groveID).Get(pollCtx, agentName)
+			if err != nil {
+				continue // Retry on transient errors
+			}
+			if agent.Status == "running" {
+				// Use the agent's ID from the latest fetch
+				if agent.ID != "" {
+					agentID = agent.ID
+				}
+				goto ready
+			}
+			if agent.Status == "error" || agent.Status == "failed" || agent.Status == "stopped" {
+				statusInfo := agent.Status
+				if agent.ContainerStatus != "" {
+					statusInfo += fmt.Sprintf(", container: %s", agent.ContainerStatus)
+				}
+				return fmt.Errorf("agent '%s' failed to start (status: %s)", agentName, statusInfo)
+			}
+		}
+	}
+
+ready:
+	// Get access token for WebSocket authentication
+	token := credentials.GetAccessToken(hubCtx.Endpoint)
+	if token == "" {
+		return fmt.Errorf("no access token found for Hub\n\nPlease login first: scion hub auth login")
+	}
+
+	fmt.Printf("Attaching to agent '%s' via Hub...\n", agentName)
+	return wsclient.AttachToAgent(context.Background(), hubCtx.Endpoint, token, agentID)
 }
 
 func createAgentWithBrokerResolution(ctx context.Context, hubCtx *HubContext, groveID string, req *hubclient.CreateAgentRequest) (*hubclient.CreateAgentResponse, error) {
