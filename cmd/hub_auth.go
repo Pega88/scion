@@ -28,7 +28,9 @@ import (
 )
 
 var (
-	hubAuthHubURL string
+	hubAuthHubURL    string
+	hubAuthHeadless  bool
+	hubAuthNoBrowser bool
 )
 
 // hubAuthCmd represents the auth subcommand under hub
@@ -52,9 +54,15 @@ This command will:
 3. Wait for the OAuth callback
 4. Store credentials locally
 
+In headless environments (no display server), or when --headless or --no-browser
+is specified, the device authorization flow is used instead. This displays a URL
+and code that you can enter on any device with a browser.
+
 Example:
   scion hub auth login
-  scion hub auth login --hub-url https://hub.example.com`,
+  scion hub auth login --hub-url https://hub.example.com
+  scion hub auth login --headless
+  scion hub auth login --no-browser`,
 	RunE: runHubAuthLogin,
 }
 
@@ -73,6 +81,8 @@ func init() {
 
 	// Flags for login command
 	hubAuthLoginCmd.Flags().StringVar(&hubAuthHubURL, "hub-url", "", "Hub server URL (defaults to configured endpoint)")
+	hubAuthLoginCmd.Flags().BoolVar(&hubAuthHeadless, "headless", false, "Force device flow authentication (for headless environments)")
+	hubAuthLoginCmd.Flags().BoolVar(&hubAuthNoBrowser, "no-browser", false, "Use device flow instead of opening a browser")
 }
 
 func runHubAuthLogin(cmd *cobra.Command, args []string) error {
@@ -93,18 +103,40 @@ func runHubAuthLogin(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to create Hub client: %w", err)
 	}
 
+	var tokenResp *hubclient.CLITokenResponse
+
+	if hubAuthHeadless || hubAuthNoBrowser || util.IsHeadlessEnvironment() {
+		// Device authorization flow for headless environments
+		deviceAuth := auth.NewDeviceFlowAuth(client.Auth())
+		tokenResp, err = deviceAuth.Authenticate(cmd.Context())
+		if err != nil {
+			return fmt.Errorf("device flow authentication failed: %w", err)
+		}
+	} else {
+		// Browser-based OAuth flow
+		tokenResp, err = runBrowserAuthFlow(cmd, client)
+		if err != nil {
+			return err
+		}
+	}
+
+	return storeTokenAndPrintResult(hubURL, tokenResp)
+}
+
+// runBrowserAuthFlow performs the browser-based OAuth flow.
+func runBrowserAuthFlow(cmd *cobra.Command, client hubclient.Client) (*hubclient.CLITokenResponse, error) {
 	// Start localhost callback server
 	authServer := auth.NewLocalhostAuthServer()
 	callbackURL, state, err := authServer.Start(cmd.Context())
 	if err != nil {
-		return fmt.Errorf("failed to start auth server: %w", err)
+		return nil, fmt.Errorf("failed to start auth server: %w", err)
 	}
 	defer authServer.Shutdown()
 
 	// Get OAuth URL from Hub
 	authResp, err := client.Auth().GetAuthURL(cmd.Context(), callbackURL, state)
 	if err != nil {
-		return fmt.Errorf("failed to get auth URL: %w", err)
+		return nil, fmt.Errorf("failed to get auth URL: %w", err)
 	}
 
 	// Open browser
@@ -118,16 +150,21 @@ func runHubAuthLogin(cmd *cobra.Command, args []string) error {
 	fmt.Println("Waiting for authentication...")
 	code, err := authServer.WaitForCode(cmd.Context())
 	if err != nil {
-		return fmt.Errorf("authentication failed: %w", err)
+		return nil, fmt.Errorf("authentication failed: %w", err)
 	}
 
 	// Exchange code for token
 	tokenResp, err := client.Auth().ExchangeCode(cmd.Context(), code, callbackURL)
 	if err != nil {
-		return fmt.Errorf("failed to get token: %w", err)
+		return nil, fmt.Errorf("failed to get token: %w", err)
 	}
 
-	// Convert to credentials format
+	return tokenResp, nil
+}
+
+// storeTokenAndPrintResult stores the token response as credentials and prints
+// the login result to the terminal.
+func storeTokenAndPrintResult(hubURL string, tokenResp *hubclient.CLITokenResponse) error {
 	credToken := &credentials.TokenResponse{
 		AccessToken:  tokenResp.AccessToken,
 		RefreshToken: tokenResp.RefreshToken,
@@ -142,7 +179,6 @@ func runHubAuthLogin(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Store credentials
 	if err := credentials.Store(hubURL, credToken); err != nil {
 		return fmt.Errorf("failed to store credentials: %w", err)
 	}

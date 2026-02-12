@@ -689,6 +689,8 @@ func (s *Server) registerRoutes() {
 	// CLI OAuth endpoints (unauthenticated - used for login)
 	s.mux.HandleFunc("/api/v1/auth/cli/authorize", s.handleCLIAuthAuthorize)
 	s.mux.HandleFunc("/api/v1/auth/cli/token", s.handleCLIAuthToken)
+	s.mux.HandleFunc("/api/v1/auth/cli/device", s.handleCLIDeviceAuthorize)
+	s.mux.HandleFunc("/api/v1/auth/cli/device/token", s.handleCLIDeviceToken)
 
 	// API v1 routes
 	s.mux.HandleFunc("/api/v1/agents", s.handleAgents)

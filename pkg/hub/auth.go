@@ -298,6 +298,10 @@ func isUnauthenticatedEndpoint(path string) bool {
 		return true
 	case "/api/v1/auth/cli/token": // CLI OAuth token exchange
 		return true
+	case "/api/v1/auth/cli/device": // CLI device flow initiation
+		return true
+	case "/api/v1/auth/cli/device/token": // CLI device flow token polling
+		return true
 	case "/api/v1/brokers/join": // Broker registration bootstrap (uses join token)
 		return true
 	}

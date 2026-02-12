@@ -16,6 +16,8 @@ package hubclient
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 
 	"github.com/ptone/scion-agent/pkg/apiclient"
 )
@@ -42,6 +44,12 @@ type AuthService interface {
 
 	// ExchangeCode exchanges an authorization code for tokens.
 	ExchangeCode(ctx context.Context, code, callbackURL string) (*CLITokenResponse, error)
+
+	// RequestDeviceCode initiates the device authorization flow.
+	RequestDeviceCode(ctx context.Context, provider string) (*DeviceCodeResponse, error)
+
+	// PollDeviceToken polls for the device authorization result.
+	PollDeviceToken(ctx context.Context, deviceCode, provider string) (*DeviceTokenPollResponse, error)
 }
 
 // authService is the implementation of AuthService.
@@ -169,4 +177,78 @@ func (s *authService) ExchangeCode(ctx context.Context, code, callbackURL string
 		return nil, err
 	}
 	return apiclient.DecodeResponse[CLITokenResponse](resp)
+}
+
+// DeviceCodeResponse is the response from initiating a device authorization flow.
+type DeviceCodeResponse struct {
+	DeviceCode              string `json:"deviceCode"`
+	UserCode                string `json:"userCode"`
+	VerificationURL         string `json:"verificationUrl"`
+	VerificationURLComplete string `json:"verificationUrlComplete,omitempty"`
+	ExpiresIn               int    `json:"expiresIn"`
+	Interval                int    `json:"interval"`
+}
+
+// DeviceTokenPollResponse is the response from polling for device authorization.
+type DeviceTokenPollResponse struct {
+	Status       string `json:"status,omitempty"`
+	Interval     int    `json:"interval,omitempty"`
+	AccessToken  string `json:"accessToken,omitempty"`
+	RefreshToken string `json:"refreshToken,omitempty"`
+	ExpiresIn    int64  `json:"expiresIn,omitempty"`
+	User         *User  `json:"user,omitempty"`
+}
+
+// RequestDeviceCode initiates the device authorization flow.
+func (s *authService) RequestDeviceCode(ctx context.Context, provider string) (*DeviceCodeResponse, error) {
+	body := struct {
+		Provider string `json:"provider,omitempty"`
+	}{
+		Provider: provider,
+	}
+	resp, err := s.c.transport.Post(ctx, "/api/v1/auth/cli/device", body, nil)
+	if err != nil {
+		return nil, err
+	}
+	return apiclient.DecodeResponse[DeviceCodeResponse](resp)
+}
+
+// PollDeviceToken polls for the device authorization result.
+// It handles non-200 status codes directly since the polling endpoint uses
+// 202 (pending), 410 (expired), and 429 (slow down) to indicate states.
+func (s *authService) PollDeviceToken(ctx context.Context, deviceCode, provider string) (*DeviceTokenPollResponse, error) {
+	body := struct {
+		DeviceCode string `json:"deviceCode"`
+		Provider   string `json:"provider,omitempty"`
+	}{
+		DeviceCode: deviceCode,
+		Provider:   provider,
+	}
+	resp, err := s.c.transport.Post(ctx, "/api/v1/auth/cli/device/token", body, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case 200:
+		var result DeviceTokenPollResponse
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			return nil, fmt.Errorf("failed to decode device token response: %w", err)
+		}
+		return &result, nil
+	case 202:
+		return &DeviceTokenPollResponse{Status: "authorization_pending"}, nil
+	case 410:
+		return &DeviceTokenPollResponse{Status: "expired_token"}, nil
+	case 429:
+		var result DeviceTokenPollResponse
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			return &DeviceTokenPollResponse{Status: "slow_down"}, nil
+		}
+		result.Status = "slow_down"
+		return &result, nil
+	default:
+		return nil, fmt.Errorf("unexpected status code %d from device token endpoint", resp.StatusCode)
+	}
 }

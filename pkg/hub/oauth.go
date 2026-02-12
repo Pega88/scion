@@ -155,6 +155,12 @@ const (
 	githubEmailURL = "https://api.github.com/user/emails"
 )
 
+// Device authorization endpoints
+const (
+	googleDeviceCodeURL = "https://oauth2.googleapis.com/device/code"
+	githubDeviceCodeURL = "https://github.com/login/device/code"
+)
+
 // GetAuthorizationURL generates an OAuth authorization URL for the specified provider.
 // Uses the default (CLI) client configuration for backward compatibility.
 func (s *OAuthService) GetAuthorizationURL(provider, callbackURL, state string) (string, error) {
@@ -538,4 +544,227 @@ func (s *OAuthService) getGitHubPrimaryEmail(ctx context.Context, accessToken st
 	}
 
 	return "", fmt.Errorf("no email found")
+}
+
+// DeviceCodeResponse holds the response from a device authorization request.
+type DeviceCodeResponse struct {
+	DeviceCode              string `json:"device_code"`
+	UserCode                string `json:"user_code"`
+	VerificationURI         string `json:"verification_uri"`
+	VerificationURIComplete string `json:"verification_uri_complete,omitempty"`
+	ExpiresIn               int    `json:"expires_in"`
+	Interval                int    `json:"interval"`
+}
+
+// DeviceAuthError represents a non-success state from device token polling.
+type DeviceAuthError struct {
+	Code     string // "authorization_pending", "slow_down", "expired_token"
+	Interval int    // updated interval for slow_down
+}
+
+func (e *DeviceAuthError) Error() string {
+	return fmt.Sprintf("device auth: %s", e.Code)
+}
+
+// RequestDeviceCode initiates the device authorization flow with the provider.
+func (s *OAuthService) RequestDeviceCode(ctx context.Context, clientType OAuthClientType, provider string) (*DeviceCodeResponse, error) {
+	cfg := s.getClientConfig(clientType)
+
+	switch provider {
+	case "google":
+		return s.requestGoogleDeviceCode(ctx, cfg.Google)
+	case "github":
+		return s.requestGitHubDeviceCode(ctx, cfg.GitHub)
+	default:
+		return nil, fmt.Errorf("unsupported OAuth provider for device flow: %s", provider)
+	}
+}
+
+func (s *OAuthService) requestGoogleDeviceCode(ctx context.Context, cfg OAuthProviderConfig) (*DeviceCodeResponse, error) {
+	if cfg.ClientID == "" {
+		return nil, fmt.Errorf("Google OAuth is not configured")
+	}
+
+	data := url.Values{
+		"client_id": {cfg.ClientID},
+		"scope":     {"openid email profile"},
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", googleDeviceCodeURL, strings.NewReader(data.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("device code request failed: %s - %s", resp.Status, string(body))
+	}
+
+	var result DeviceCodeResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode device code response: %w", err)
+	}
+
+	return &result, nil
+}
+
+func (s *OAuthService) requestGitHubDeviceCode(ctx context.Context, cfg OAuthProviderConfig) (*DeviceCodeResponse, error) {
+	if cfg.ClientID == "" {
+		return nil, fmt.Errorf("GitHub OAuth is not configured")
+	}
+
+	data := url.Values{
+		"client_id": {cfg.ClientID},
+		"scope":     {"read:user user:email"},
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", githubDeviceCodeURL, strings.NewReader(data.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("device code request failed: %s - %s", resp.Status, string(body))
+	}
+
+	var result DeviceCodeResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode device code response: %w", err)
+	}
+
+	return &result, nil
+}
+
+// PollDeviceToken polls the provider's token endpoint for the device flow result.
+// Returns a tokenResponse on success, or a DeviceAuthError for pending/slow_down/expired states.
+func (s *OAuthService) PollDeviceToken(ctx context.Context, clientType OAuthClientType, provider, deviceCode string) (*tokenResponse, error) {
+	cfg := s.getClientConfig(clientType)
+
+	switch provider {
+	case "google":
+		return s.pollGoogleDeviceToken(ctx, cfg.Google, deviceCode)
+	case "github":
+		return s.pollGitHubDeviceToken(ctx, cfg.GitHub, deviceCode)
+	default:
+		return nil, fmt.Errorf("unsupported OAuth provider for device flow: %s", provider)
+	}
+}
+
+// deviceTokenErrorResponse represents an error response from a device token endpoint.
+type deviceTokenErrorResponse struct {
+	Error    string `json:"error"`
+	Interval int    `json:"interval,omitempty"`
+}
+
+func (s *OAuthService) pollGoogleDeviceToken(ctx context.Context, cfg OAuthProviderConfig, deviceCode string) (*tokenResponse, error) {
+	data := url.Values{
+		"client_id":     {cfg.ClientID},
+		"client_secret": {cfg.ClientSecret},
+		"device_code":   {deviceCode},
+		"grant_type":    {"urn:ietf:params:oauth:grant-type:device_code"},
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", googleTokenURL, strings.NewReader(data.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read device token response: %w", err)
+	}
+
+	if resp.StatusCode == http.StatusOK {
+		var tokenResp tokenResponse
+		if err := json.Unmarshal(body, &tokenResp); err != nil {
+			return nil, fmt.Errorf("failed to decode token response: %w", err)
+		}
+		return &tokenResp, nil
+	}
+
+	// Parse error response
+	var errResp deviceTokenErrorResponse
+	if err := json.Unmarshal(body, &errResp); err != nil {
+		return nil, fmt.Errorf("device token poll failed: %s - %s", resp.Status, string(body))
+	}
+
+	switch errResp.Error {
+	case "authorization_pending", "slow_down", "expired_token":
+		return nil, &DeviceAuthError{Code: errResp.Error, Interval: errResp.Interval}
+	default:
+		return nil, fmt.Errorf("device token poll failed: %s", errResp.Error)
+	}
+}
+
+func (s *OAuthService) pollGitHubDeviceToken(ctx context.Context, cfg OAuthProviderConfig, deviceCode string) (*tokenResponse, error) {
+	data := url.Values{
+		"client_id":   {cfg.ClientID},
+		"device_code": {deviceCode},
+		"grant_type":  {"urn:ietf:params:oauth:grant-type:device_code"},
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", githubTokenURL, strings.NewReader(data.Encode()))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read device token response: %w", err)
+	}
+
+	// GitHub returns 200 for all responses, using "error" field to indicate state
+	var errCheck deviceTokenErrorResponse
+	if err := json.Unmarshal(body, &errCheck); err == nil && errCheck.Error != "" {
+		switch errCheck.Error {
+		case "authorization_pending", "slow_down", "expired_token":
+			return nil, &DeviceAuthError{Code: errCheck.Error, Interval: errCheck.Interval}
+		default:
+			return nil, fmt.Errorf("device token poll failed: %s", errCheck.Error)
+		}
+	}
+
+	if resp.StatusCode == http.StatusOK {
+		var tokenResp tokenResponse
+		if err := json.Unmarshal(body, &tokenResp); err != nil {
+			return nil, fmt.Errorf("failed to decode token response: %w", err)
+		}
+		if tokenResp.AccessToken == "" {
+			return nil, fmt.Errorf("no access token in response: %s", string(body))
+		}
+		return &tokenResp, nil
+	}
+
+	return nil, fmt.Errorf("device token poll failed: %s - %s", resp.Status, string(body))
 }

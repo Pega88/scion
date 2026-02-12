@@ -15,7 +15,9 @@
 package hub
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -773,6 +775,245 @@ func (s *Server) handleCLIAuthToken(w http.ResponseWriter, r *http.Request) {
 			user.DisplayName = userInfo.DisplayName
 		}
 		// Check if user should be promoted to admin (in case admin list changed)
+		if user.Role != "admin" && s.getUserRole(userInfo.Email) == "admin" {
+			user.Role = "admin"
+		}
+		_ = s.store.UpdateUser(ctx, user)
+	}
+
+	// Generate Hub tokens (CLI type for longer duration)
+	if s.userTokenService == nil {
+		InternalError(w)
+		return
+	}
+
+	accessToken, refreshToken, expiresIn, err := s.userTokenService.GenerateTokenPair(
+		user.ID, user.Email, user.DisplayName, user.Role, ClientTypeCLI,
+	)
+	if err != nil {
+		InternalError(w)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, CLIAuthTokenResponse{
+		AccessToken:  accessToken,
+		RefreshToken: refreshToken,
+		ExpiresIn:    expiresIn,
+		User: &UserResponse{
+			ID:          user.ID,
+			Email:       user.Email,
+			DisplayName: user.DisplayName,
+			Role:        user.Role,
+			AvatarURL:   user.AvatarURL,
+		},
+	})
+}
+
+// CLIDeviceAuthorizeRequest is the request body for /api/v1/auth/cli/device.
+type CLIDeviceAuthorizeRequest struct {
+	Provider string `json:"provider,omitempty"`
+}
+
+// CLIDeviceAuthorizeResponse is the response for /api/v1/auth/cli/device.
+type CLIDeviceAuthorizeResponse struct {
+	DeviceCode              string `json:"deviceCode"`
+	UserCode                string `json:"userCode"`
+	VerificationURL         string `json:"verificationUrl"`
+	VerificationURLComplete string `json:"verificationUrlComplete,omitempty"`
+	ExpiresIn               int    `json:"expiresIn"`
+	Interval                int    `json:"interval"`
+}
+
+// CLIDeviceTokenRequest is the request body for /api/v1/auth/cli/device/token.
+type CLIDeviceTokenRequest struct {
+	DeviceCode string `json:"deviceCode"`
+	Provider   string `json:"provider,omitempty"`
+}
+
+// CLIDeviceTokenResponse is the response for /api/v1/auth/cli/device/token.
+type CLIDeviceTokenResponse struct {
+	// Pending/error states:
+	Status   string `json:"status,omitempty"`
+	Interval int    `json:"interval,omitempty"`
+	// Success (same shape as CLIAuthTokenResponse):
+	AccessToken  string        `json:"accessToken,omitempty"`
+	RefreshToken string        `json:"refreshToken,omitempty"`
+	ExpiresIn    int64         `json:"expiresIn,omitempty"`
+	User         *UserResponse `json:"user,omitempty"`
+}
+
+// handleCLIDeviceAuthorize handles POST /api/v1/auth/cli/device.
+// This endpoint initiates the device authorization flow.
+func (s *Server) handleCLIDeviceAuthorize(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		MethodNotAllowed(w)
+		return
+	}
+
+	var req CLIDeviceAuthorizeRequest
+	if err := readJSON(r, &req); err != nil {
+		BadRequest(w, "invalid request body")
+		return
+	}
+
+	provider := req.Provider
+	if provider == "" {
+		provider = "google"
+	}
+
+	if s.oauthService == nil {
+		writeError(w, http.StatusNotImplemented, "not_implemented",
+			"OAuth is not configured on this server", nil)
+		return
+	}
+
+	if !s.oauthService.IsProviderConfiguredForClient(OAuthClientTypeCLI, provider) {
+		writeError(w, http.StatusBadRequest, ErrCodeValidationError,
+			"OAuth provider not configured for CLI: "+provider, nil)
+		return
+	}
+
+	codeResp, err := s.oauthService.RequestDeviceCode(r.Context(), OAuthClientTypeCLI, provider)
+	if err != nil {
+		slog.Error("Device code request failed", "provider", provider, "error", err)
+		writeError(w, http.StatusInternalServerError, "oauth_error",
+			"failed to request device code", nil)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, CLIDeviceAuthorizeResponse{
+		DeviceCode:              codeResp.DeviceCode,
+		UserCode:                codeResp.UserCode,
+		VerificationURL:         codeResp.VerificationURI,
+		VerificationURLComplete: codeResp.VerificationURIComplete,
+		ExpiresIn:               codeResp.ExpiresIn,
+		Interval:                codeResp.Interval,
+	})
+}
+
+// handleCLIDeviceToken handles POST /api/v1/auth/cli/device/token.
+// This endpoint polls for the device authorization result.
+func (s *Server) handleCLIDeviceToken(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		MethodNotAllowed(w)
+		return
+	}
+
+	var req CLIDeviceTokenRequest
+	if err := readJSON(r, &req); err != nil {
+		BadRequest(w, "invalid request body")
+		return
+	}
+
+	if req.DeviceCode == "" {
+		ValidationError(w, "missing required field: deviceCode", nil)
+		return
+	}
+
+	provider := req.Provider
+	if provider == "" {
+		provider = "google"
+	}
+
+	if s.oauthService == nil {
+		writeError(w, http.StatusNotImplemented, "not_implemented",
+			"OAuth is not configured on this server", nil)
+		return
+	}
+
+	ctx := r.Context()
+	tokenResp, err := s.oauthService.PollDeviceToken(ctx, OAuthClientTypeCLI, provider, req.DeviceCode)
+	if err != nil {
+		// Check if it's a device auth error (pending, slow_down, expired)
+		if authErr, ok := err.(*DeviceAuthError); ok {
+			switch authErr.Code {
+			case "authorization_pending":
+				writeJSON(w, http.StatusAccepted, CLIDeviceTokenResponse{
+					Status: "authorization_pending",
+				})
+				return
+			case "expired_token":
+				writeJSON(w, http.StatusGone, CLIDeviceTokenResponse{
+					Status: "expired_token",
+				})
+				return
+			case "slow_down":
+				writeJSON(w, http.StatusTooManyRequests, CLIDeviceTokenResponse{
+					Status:   "slow_down",
+					Interval: authErr.Interval,
+				})
+				return
+			}
+		}
+		slog.Error("Device token poll failed", "provider", provider, "error", err)
+		writeError(w, http.StatusBadRequest, "oauth_error",
+			"failed to poll device token", nil)
+		return
+	}
+
+	// Success — get user info from provider and complete login
+	userInfo, err := s.getDeviceFlowUserInfo(ctx, provider, tokenResp.AccessToken)
+	if err != nil {
+		slog.Error("Failed to get user info from device flow token", "provider", provider, "error", err)
+		writeError(w, http.StatusInternalServerError, "oauth_error",
+			"failed to get user info", nil)
+		return
+	}
+
+	s.completeOAuthLogin(w, r, userInfo)
+}
+
+// getDeviceFlowUserInfo retrieves user info from the provider using an access token.
+func (s *Server) getDeviceFlowUserInfo(ctx context.Context, provider, accessToken string) (*OAuthUserInfo, error) {
+	switch provider {
+	case "google":
+		return s.oauthService.getGoogleUserInfo(ctx, accessToken)
+	case "github":
+		return s.oauthService.getGitHubUserInfo(ctx, accessToken)
+	default:
+		return nil, fmt.Errorf("unsupported provider: %s", provider)
+	}
+}
+
+// completeOAuthLogin is the shared logic for completing an OAuth login
+// after user info has been obtained from the provider.
+func (s *Server) completeOAuthLogin(w http.ResponseWriter, r *http.Request, userInfo *OAuthUserInfo) {
+	ctx := r.Context()
+
+	// Check if user's email domain is authorized
+	if !isEmailAuthorized(userInfo.Email, s.config.AuthorizedDomains, s.config.AdminEmails) {
+		writeError(w, http.StatusForbidden, "unauthorized_domain",
+			"your email domain is not authorized", nil)
+		return
+	}
+
+	// Find or create user
+	user, err := s.store.GetUserByEmail(ctx, userInfo.Email)
+	if err != nil {
+		// Create new user
+		user = &store.User{
+			ID:          generateID(),
+			Email:       userInfo.Email,
+			DisplayName: userInfo.DisplayName,
+			AvatarURL:   userInfo.AvatarURL,
+			Role:        s.getUserRole(userInfo.Email),
+			Status:      "active",
+			Created:     time.Now(),
+			LastLogin:   time.Now(),
+		}
+		if err := s.store.CreateUser(ctx, user); err != nil {
+			InternalError(w)
+			return
+		}
+	} else {
+		// Update last login and profile info
+		user.LastLogin = time.Now()
+		if userInfo.AvatarURL != "" && user.AvatarURL == "" {
+			user.AvatarURL = userInfo.AvatarURL
+		}
+		if userInfo.DisplayName != "" && user.DisplayName == "" {
+			user.DisplayName = userInfo.DisplayName
+		}
 		if user.Role != "admin" && s.getUserRole(userInfo.Email) == "admin" {
 			user.Role = "admin"
 		}

@@ -325,3 +325,60 @@ func TestAuthTokenProviderInference(t *testing.T) {
 		}
 	}
 }
+
+func TestCLIDeviceAuthorize_OAuthNotConfigured(t *testing.T) {
+	srv, _ := testServer(t)
+
+	body := CLIDeviceAuthorizeRequest{Provider: "google"}
+	rec := doRequestNoAuth(t, srv, http.MethodPost, "/api/v1/auth/cli/device", body)
+
+	if rec.Code != http.StatusNotImplemented {
+		t.Errorf("expected status 501 when OAuth not configured, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCLIDeviceAuthorize_MethodNotAllowed(t *testing.T) {
+	srv, _ := testServer(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/cli/device", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected status 405 for GET, got %d", rec.Code)
+	}
+}
+
+func TestCLIDeviceToken_MissingDeviceCode(t *testing.T) {
+	srv, _ := testServer(t)
+
+	body := CLIDeviceTokenRequest{Provider: "google"}
+	rec := doRequestNoAuth(t, srv, http.MethodPost, "/api/v1/auth/cli/device/token", body)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400 for missing deviceCode, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCLIDeviceToken_OAuthNotConfigured(t *testing.T) {
+	srv, _ := testServer(t)
+
+	body := CLIDeviceTokenRequest{DeviceCode: "test-code", Provider: "google"}
+	rec := doRequestNoAuth(t, srv, http.MethodPost, "/api/v1/auth/cli/device/token", body)
+
+	if rec.Code != http.StatusNotImplemented {
+		t.Errorf("expected status 501 when OAuth not configured, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestCLIDeviceToken_MethodNotAllowed(t *testing.T) {
+	srv, _ := testServer(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/cli/device/token", nil)
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected status 405 for GET, got %d", rec.Code)
+	}
+}
