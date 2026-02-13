@@ -282,6 +282,9 @@ func TestEnvKeyToConfigKey(t *testing.T) {
 		{"AUTH_DEVTOKEN", "auth.devToken"},
 		{"LOGLEVEL", "logLevel"},
 		{"LOGFORMAT", "logFormat"},
+		{"SECRETS_BACKEND", "secrets.backend"},
+		{"SECRETS_GCPPROJECTID", "secrets.gcpProjectId"},
+		{"SECRETS_GCPCREDENTIALS", "secrets.gcpCredentials"},
 	}
 
 	for _, tc := range tests {

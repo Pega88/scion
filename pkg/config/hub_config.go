@@ -399,6 +399,8 @@ func envKeyToConfigKey(envKey string) string {
 		"localpath":         "localPath",
 		"authorizeddomains": "authorizedDomains",
 		"adminemails":       "adminEmails",
+		"gcpprojectid":      "gcpProjectId",
+		"gcpcredentials":    "gcpCredentials",
 	}
 
 	// Split by underscore, convert each part
