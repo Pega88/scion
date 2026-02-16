@@ -52,6 +52,7 @@ func testServer(t *testing.T) (*Server, store.Store) {
 	cfg := DefaultServerConfig()
 	cfg.DevAuthToken = testDevToken // Enable dev auth for testing
 	srv := New(cfg, s)
+	t.Cleanup(func() { srv.Shutdown(context.Background()) })
 	return srv, s
 }
 
@@ -1479,6 +1480,7 @@ func testServerWithBrokerAuth(t *testing.T) (*Server, store.Store) {
 	cfg.DevAuthToken = testDevToken
 	cfg.BrokerAuthConfig = DefaultBrokerAuthConfig()
 	srv := New(cfg, s)
+	t.Cleanup(func() { srv.Shutdown(context.Background()) })
 	return srv, s
 }
 

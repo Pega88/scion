@@ -158,6 +158,7 @@ func testBootstrapServer(t *testing.T) (*Server, store.Store, *mockStorage, *moc
 	cfg := DefaultServerConfig()
 	cfg.DevAuthToken = testBootstrapDevToken
 	srv := New(cfg, s)
+	t.Cleanup(func() { srv.Shutdown(context.Background()) })
 
 	stor := newMockStorage("test-bucket")
 	srv.SetStorage(stor)

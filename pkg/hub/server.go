@@ -663,6 +663,11 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		cc.Shutdown()
 	}
 
+	// Stop the nonce cache cleanup goroutine
+	if s.brokerAuthService != nil {
+		s.brokerAuthService.Close()
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 

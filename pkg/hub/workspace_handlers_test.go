@@ -48,6 +48,7 @@ func testWorkspaceServer(t *testing.T) (*Server, store.Store) {
 	cfg := DefaultServerConfig()
 	cfg.DevAuthToken = testWorkspaceDevToken
 	srv := New(cfg, s)
+	t.Cleanup(func() { srv.Shutdown(context.Background()) })
 	return srv, s
 }
 

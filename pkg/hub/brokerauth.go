@@ -78,6 +78,7 @@ type NonceCache struct {
 	mu     sync.RWMutex
 	nonces map[string]time.Time
 	ttl    time.Duration
+	done   chan struct{}
 }
 
 // NewNonceCache creates a new nonce cache.
@@ -85,10 +86,21 @@ func NewNonceCache(ttl time.Duration) *NonceCache {
 	nc := &NonceCache{
 		nonces: make(map[string]time.Time),
 		ttl:    ttl,
+		done:   make(chan struct{}),
 	}
 	// Start cleanup goroutine
 	go nc.cleanup()
 	return nc
+}
+
+// Stop shuts down the cleanup goroutine. It is safe to call multiple times.
+func (nc *NonceCache) Stop() {
+	select {
+	case <-nc.done:
+		// Already stopped.
+	default:
+		close(nc.done)
+	}
 }
 
 // Add adds a nonce to the cache. Returns false if nonce already exists.
@@ -106,15 +118,22 @@ func (nc *NonceCache) Add(nonce string) bool {
 // cleanup periodically removes expired nonces.
 func (nc *NonceCache) cleanup() {
 	ticker := time.NewTicker(nc.ttl / 2)
-	for range ticker.C {
-		nc.mu.Lock()
-		cutoff := time.Now().Add(-nc.ttl)
-		for nonce, addedAt := range nc.nonces {
-			if addedAt.Before(cutoff) {
-				delete(nc.nonces, nonce)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-nc.done:
+			return
+		case <-ticker.C:
+			nc.mu.Lock()
+			cutoff := time.Now().Add(-nc.ttl)
+			for nonce, addedAt := range nc.nonces {
+				if addedAt.Before(cutoff) {
+					delete(nc.nonces, nonce)
+				}
 			}
+			nc.mu.Unlock()
 		}
-		nc.mu.Unlock()
 	}
 }
 
@@ -128,6 +147,14 @@ func NewBrokerAuthService(config BrokerAuthConfig, s store.Store) *BrokerAuthSer
 		svc.nonces = NewNonceCache(config.NonceCacheTTL)
 	}
 	return svc
+}
+
+// Close releases resources held by the BrokerAuthService, including stopping the
+// nonce cache cleanup goroutine.
+func (bas *BrokerAuthService) Close() {
+	if bas.nonces != nil {
+		bas.nonces.Stop()
+	}
 }
 
 // =============================================================================

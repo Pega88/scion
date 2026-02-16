@@ -48,6 +48,7 @@ func setupTestBrokerAuthService(t *testing.T) (*BrokerAuthService, store.Store) 
 
 	config := DefaultBrokerAuthConfig()
 	svc := NewBrokerAuthService(config, s)
+	t.Cleanup(svc.Close)
 
 	return svc, s
 }
@@ -159,6 +160,7 @@ func TestJoinWithExpiredToken(t *testing.T) {
 	config := DefaultBrokerAuthConfig()
 	config.JoinTokenExpiry = -1 * time.Hour // Already expired
 	svc := NewBrokerAuthService(config, s)
+	t.Cleanup(svc.Close)
 	ctx := context.Background()
 
 	// Create a broker registration (token will already be expired)
@@ -338,6 +340,7 @@ func TestValidateBrokerSignature_ClockSkew(t *testing.T) {
 	config := DefaultBrokerAuthConfig()
 	config.MaxClockSkew = 1 * time.Second
 	svc := NewBrokerAuthService(config, s)
+	t.Cleanup(svc.Close)
 	ctx := context.Background()
 
 	// Create a broker with secret

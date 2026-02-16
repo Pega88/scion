@@ -38,6 +38,7 @@ func TestServer_PersistentSigningKeys(t *testing.T) {
 
 	// Create first server
 	srv1 := New(cfg, s)
+	t.Cleanup(func() { srv1.Shutdown(context.Background()) })
 	if srv1.agentTokenService == nil {
 		t.Fatal("agentTokenService not initialized in srv1")
 	}
@@ -50,6 +51,7 @@ func TestServer_PersistentSigningKeys(t *testing.T) {
 
 	// Create second server with the same store
 	srv2 := New(cfg, s)
+	t.Cleanup(func() { srv2.Shutdown(context.Background()) })
 	if srv2.agentTokenService == nil {
 		t.Fatal("agentTokenService not initialized in srv2")
 	}
