@@ -23,6 +23,7 @@ import (
 
 	"github.com/knadh/koanf/parsers/json"
 	"github.com/knadh/koanf/parsers/yaml"
+	"github.com/knadh/koanf/providers/confmap"
 	"github.com/knadh/koanf/providers/env"
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/providers/rawbytes"
@@ -82,6 +83,9 @@ func LoadSettingsKoanf(grovePath string) (*Settings, error) {
 			subkey := strings.TrimPrefix(key, "hub_")
 			// Convert snake_case to camelCase for specific keys
 			switch subkey {
+			case "grove_id":
+				// SCION_HUB_GROVE_ID maps to top-level grove_id, not hub.grove_id
+				return "grove_id"
 			case "api_key":
 				return "hub.apiKey"
 			case "broker_id":
@@ -94,6 +98,17 @@ func LoadSettingsKoanf(grovePath string) (*Settings, error) {
 		}
 		return key
 	}), nil)
+
+	// Normalize v1 settings keys to legacy keyspace.
+	// In v1 format, grove_id is stored as hub.grove_id (snake_case), but the
+	// legacy Settings struct expects it at the top level (grove_id). The
+	// HubClientConfig struct uses koanf tag "groveId" (camelCase), so the
+	// v1 key hub.grove_id doesn't match either location without remapping.
+	if k.Exists("hub.grove_id") && !k.Exists("grove_id") {
+		_ = k.Load(confmap.Provider(map[string]interface{}{
+			"grove_id": k.String("hub.grove_id"),
+		}, "."), nil)
+	}
 
 	// Unmarshal into Settings struct
 	settings := &Settings{

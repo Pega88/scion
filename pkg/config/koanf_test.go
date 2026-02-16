@@ -281,6 +281,114 @@ func TestGetScionAgentConfigPath(t *testing.T) {
 	}
 }
 
+func TestLoadSettingsKoanfV1GroveID(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	originalHome := os.Getenv("HOME")
+	defer os.Setenv("HOME", originalHome)
+	os.Setenv("HOME", tmpDir)
+
+	groveDir := filepath.Join(tmpDir, "my-grove")
+	groveScionDir := filepath.Join(groveDir, ".scion")
+	if err := os.MkdirAll(groveScionDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a v1 format settings file where grove_id is under hub.grove_id
+	v1Settings := `schema_version: "1"
+hub:
+  enabled: true
+  endpoint: "http://localhost:9810"
+  grove_id: "test-grove-uuid-1234"
+`
+	if err := os.WriteFile(filepath.Join(groveScionDir, "settings.yaml"), []byte(v1Settings), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := LoadSettingsKoanf(groveScionDir)
+	if err != nil {
+		t.Fatalf("LoadSettingsKoanf failed: %v", err)
+	}
+
+	// The v1 hub.grove_id should be normalized to the top-level GroveID
+	if s.GroveID != "test-grove-uuid-1234" {
+		t.Errorf("expected top-level GroveID 'test-grove-uuid-1234', got '%s'", s.GroveID)
+	}
+
+	// Hub should still be populated
+	if s.Hub == nil {
+		t.Fatal("expected Hub config to be set")
+	}
+	if !*s.Hub.Enabled {
+		t.Error("expected Hub to be enabled")
+	}
+	if s.Hub.Endpoint != "http://localhost:9810" {
+		t.Errorf("expected Hub endpoint 'http://localhost:9810', got '%s'", s.Hub.Endpoint)
+	}
+}
+
+func TestLoadSettingsKoanfV1GroveIDNoOverrideTopLevel(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	originalHome := os.Getenv("HOME")
+	defer os.Setenv("HOME", originalHome)
+	os.Setenv("HOME", tmpDir)
+
+	groveDir := filepath.Join(tmpDir, "my-grove")
+	groveScionDir := filepath.Join(groveDir, ".scion")
+	if err := os.MkdirAll(groveScionDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a legacy format settings file with top-level grove_id
+	// AND hub.grove_id — the top-level should take precedence
+	legacySettings := `grove_id: "top-level-id"
+hub:
+  enabled: true
+  grove_id: "hub-level-id"
+`
+	if err := os.WriteFile(filepath.Join(groveScionDir, "settings.yaml"), []byte(legacySettings), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := LoadSettingsKoanf(groveScionDir)
+	if err != nil {
+		t.Fatalf("LoadSettingsKoanf failed: %v", err)
+	}
+
+	// Top-level grove_id should be preserved, not overridden by hub.grove_id
+	if s.GroveID != "top-level-id" {
+		t.Errorf("expected top-level GroveID 'top-level-id', got '%s'", s.GroveID)
+	}
+}
+
+func TestLoadSettingsKoanfV1GroveIDFromEnv(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	originalHome := os.Getenv("HOME")
+	defer os.Setenv("HOME", originalHome)
+	os.Setenv("HOME", tmpDir)
+
+	groveDir := filepath.Join(tmpDir, "my-grove")
+	groveScionDir := filepath.Join(groveDir, ".scion")
+	if err := os.MkdirAll(groveScionDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Set SCION_HUB_GROVE_ID env var — should map to top-level grove_id
+	os.Setenv("SCION_HUB_GROVE_ID", "env-grove-uuid")
+	defer os.Unsetenv("SCION_HUB_GROVE_ID")
+
+	s, err := LoadSettingsKoanf(groveScionDir)
+	if err != nil {
+		t.Fatalf("LoadSettingsKoanf failed: %v", err)
+	}
+
+	if s.GroveID != "env-grove-uuid" {
+		t.Errorf("expected GroveID 'env-grove-uuid' from env var, got '%s'", s.GroveID)
+	}
+}
+
 func TestLoadSettingsKoanfWithJSONFallback(t *testing.T) {
 	tmpDir := t.TempDir()
 
