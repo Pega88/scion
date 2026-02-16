@@ -596,151 +596,70 @@ At the harness layer:
 
 ---
 
-## 6. Implementation Sketch
+## 6. Implementation Phases
 
-### 6.1 Phase 1: Harness-Config Directory Infrastructure
+This work is divided into four progressive phases. Each phase produces a working system (no broken intermediate states) and can be planned and implemented independently, consulting this design document for context.
 
-**Goal:** Create the on-disk `harness-configs/` structure and move harness embeds to `pkg/harness/`.
+### 6.1 Phase 1: Harness-Config Infrastructure
 
-1. Create `pkg/harness/<harness>/embeds/` directories by extracting harness-specific home files from current `pkg/config/embeds/<harness>/` directories.
+**Goal:** Establish the on-disk harness-config directory model and relocate harness embeds out of `pkg/config/embeds/` into `pkg/harness/`.
 
-2. Define `config.yaml` schema for harness-configs:
-   ```yaml
-   harness: string           # Which harness implementation to use
-   image: string             # Container image
-   user: string              # Container user
-   model: string             # Default model
-   args: []string            # Additional CLI arguments
-   env: map[string]string    # Environment variables
-   volumes: []VolumeMount    # Additional volume mounts
-   auth: AuthConfig          # Authentication configuration
-   ```
+**Scope:**
+- Create `pkg/harness/<harness>/embeds/` directories by extracting harness-specific home files (`.claude.json`, `settings.json`, `config.toml`, etc.) and harness-specific `.bashrc` additions from the current `pkg/config/embeds/<harness>/` directories
+- Define the `config.yaml` schema for harness-configs (harness type, image, user, model, args, env, volumes, auth)
+- Implement harness-config loading and resolution from on-disk `~/.scion/harness-configs/<name>/` and grove-level `.scion/harness-configs/<name>/` directories
+- Implement `SeedHarnessConfig()` to populate harness-config directories from embedded defaults
+- Add `.zshrc` to `pkg/config/embeds/common/`
 
-3. Add `SeedHarnessConfig(harnessConfigName, targetDir string, force bool)` — seeds harness-config directories into `~/.scion/harness-configs/<name>/` from embedded defaults.
+**Milestone:** Harness-configs exist as a loadable on-disk concept with embedded defaults. The existing template/provisioning flow continues to work unchanged — this phase only adds new infrastructure alongside the existing system.
 
-4. Implement `scion init --machine` for global setup of `~/.scion/`, including:
-   - Seeding all default harness-configs
-   - Setting up `settings.yaml` with `default_harness_config`
-   - Any other machine-level one-time setup
+**Key references:** §3.3 (harness-config directories), §4.1 (harness-specific home files), §5.2 (where base files live), §3.7 (embed restructuring)
 
-5. Update `scion init` (project-level) to be lightweight:
-   - Creates `.scion/` directory in the project
-   - Does NOT populate harness-config defaults or templates
-   - Errors with guidance if `~/.scion/` is not set up, prompting user to run `scion init --machine` first
+### 6.2 Phase 2: Agnostic Template Format & Harness Injection
 
-### 6.2 Phase 2: Agnostic Template Support
+**Goal:** Templates become harness-agnostic. Harnesses gain methods to inject agent instructions and system prompts from portable template artifacts.
 
-**Goal:** Support `scion-agent.yaml` without a `harness` field as the new agnostic template format.
+**Scope:**
+- Update `scion-agent.yaml` schema: remove the `harness` field entirely, add `agent_instructions`, `system_prompt`, and `default_harness_config` fields
+- Update template loading and validation — templates with a legacy `harness` field produce an error with migration guidance
+- Add `InjectAgentInstructions()` and `InjectSystemPrompt()` to the `Harness` interface
+- Implement both methods for each harness (Claude, Gemini, Codex, OpenCode, Generic), including the system prompt downgrade-to-agent-instructions fallback for harnesses without native system prompt support
+- Update template discovery to handle agnostic templates
+- Create default agnostic template(s) in `pkg/config/embeds/templates/` with `agents.md` and `system-prompt.md`
 
-1. Update `scion-agent.yaml` schema — remove `harness` field entirely. Add new fields:
-   ```yaml
-   schema_version: "1"
-   name: string              # Required
-   description: string
-   agent_instructions: string  # relative path to agents.md (or inline content)
-   system_prompt: string       # relative path to system prompt file (or inline content)
-   default_harness_config: string  # fallback harness-config name
-   env: map[string]string
-   volumes: []VolumeMount
-   resources: ResourceSpec
-   max_turns: int
-   max_duration: string
-   services: []ServiceSpec
-   ```
+**Milestone:** Templates no longer declare a harness. The harness interface supports portable content injection. Default agnostic templates are available as embedded resources. The old per-harness template embeds in `pkg/config/embeds/` can be removed.
 
-2. Update `Template.LoadConfig()` — detect and validate new format. Templates with a `harness` field present are invalid and produce an error directing the user to update.
+**Key references:** §3.1 (target template structure), §3.6 (injection methods), §4.2 (instruction/prompt delivery), §5.1 (config naming), §5.6 (legacy templates), §5.8 (system prompt and agent instructions)
 
-3. Add `InjectAgentInstructions()` and `InjectSystemPrompt()` to the `Harness` interface.
+### 6.3 Phase 3: Composition & Provisioning
 
-4. Implement both methods for each harness:
-   - Claude: configure to read `agents.md`, write system prompt to `.claude/CLAUDE.md`
-   - Gemini: configure to read `agents.md`, write system prompt to `.gemini/system_prompt.md`
-   - Codex: write `agents.md`, downgrade system prompt into agent instructions
-   - OpenCode: write `agents.md`, downgrade system prompt into agent instructions
-   - Generic: write both to standard locations
+**Goal:** Wire the full composition flow so that agent creation assembles the agent home from harness-config base layer + template overlay + injection.
 
-5. Update template discovery to handle agnostic templates.
+**Scope:**
+- Implement harness-config resolution chain: CLI `--harness-config` flag → template's `default_harness_config` → settings `default_harness_config` → error
+- Build the composition flow in `ProvisionAgent()`: copy harness-config base home, apply template harness-config scalar overrides (if present), overlay template home, inject agent instructions and system prompt, copy common files, call `Harness.Provision()`
+- Add `--harness-config` flag to `scion create`
+- Update `Harness.Provision()` to handle cases where base files may already exist from the harness-config layer (rather than assuming the template placed them)
 
-### 6.3 Phase 3: Composition in Provisioning
+**Milestone:** End-to-end agent creation works with the new composition model. `scion create --template X --harness-config Y` produces a correctly assembled agent home directory. The old `SeedTemplateDir()` flow is replaced.
 
-**Goal:** Wire the composition flow into `ProvisionAgent()`.
+**Key references:** §3.2 (how it combines), §3.4 (template-specific overrides), §3.5 (composition at agent creation), §4.4 (SeedTemplateDir inversion), §5.7 (harness-config resolution)
 
-1. Harness-config resolution order:
-   - CLI `--harness-config` flag
-   - Template's `default_harness_config` field
-   - Settings `default_harness_config` field
-   - Error if none resolved
+### 6.4 Phase 4: Init Restructuring, Settings & CLI
 
-2. Composition flow:
-   ```go
-   func composeAgentHome(harnessConfigName, agentHome, templateDir string) error {
-       // 1. Resolve harness-config directory
-       harnessConfigDir := findHarnessConfig(harnessConfigName, grovePath, globalPath)
+**Goal:** Restructure initialization into machine/project tiers, update settings to reference harness-configs by name, and provide management commands.
 
-       // 2. Copy harness-config base home → agent home
-       util.CopyDir(filepath.Join(harnessConfigDir, "home"), agentHome)
+**Scope:**
+- Implement `scion init --machine` for global setup: seeds all default harness-configs to `~/.scion/harness-configs/`, creates `settings.yaml` with `default_harness_config`
+- Make `scion init` (project-level) lightweight: creates `.scion/` without populating harness-config defaults; errors with guidance if `~/.scion/` is not set up
+- Add `default_harness_config` to `settings.yaml` schema
+- Remove inline `harness_configs` block from `settings.yaml` (moved to on-disk directories; no migration needed as this block has no existing users)
+- Implement `scion harness-config reset <name>` to restore defaults from embedded files
+- Clean up any remaining legacy code paths from the old template-harness coupling
 
-       // 3. Apply template harness-config scalar overrides (if present)
-       templateOverrides := filepath.Join(templateDir, "harness-configs", harnessConfigName)
-       if exists(templateOverrides) {
-           applyHarnessConfigOverrides(agentHome, harnessConfigDir, templateOverrides)
-       }
+**Milestone:** The full harness-agnostic template system is operational. Initialization, settings, and CLI commands reflect the new model. The transition from harness-coupled to harness-agnostic templates is complete.
 
-       // 4. Copy template home (overlay, template wins on conflict)
-       templateHome := filepath.Join(templateDir, "home")
-       if exists(templateHome) {
-           util.CopyDirMerge(templateHome, agentHome)
-       }
-
-       // 5. Copy common files
-       copyCommonFiles(agentHome)  // .tmux.conf, .bashrc, .zshrc
-
-       // 6. Inject agent instructions
-       h := harness.New(resolvedHarnessName)
-       if instructionsPath := template.AgentInstructionsPath(); instructionsPath != "" {
-           content, _ := os.ReadFile(instructionsPath)
-           h.InjectAgentInstructions(agentHome, content)
-       }
-
-       // 7. Inject system prompt (with downgrade fallback for unsupported harnesses)
-       if promptPath := template.SystemPromptPath(); promptPath != "" {
-           content, _ := os.ReadFile(promptPath)
-           h.InjectSystemPrompt(agentHome, content)
-       }
-
-       return nil
-   }
-   ```
-
-### 6.4 Phase 4: Embed and Init Restructuring
-
-**Goal:** Restructure embeds and update seeding logic.
-
-1. Move harness-specific embed files from `pkg/config/embeds/<harness>/` to `pkg/harness/<harness>/embeds/`.
-
-2. Update `SeedHarnessConfig()` implementations to use the new embed locations.
-
-3. Add default agnostic template(s) to `pkg/config/embeds/templates/`.
-
-4. Add `.zshrc` to `pkg/config/embeds/common/`.
-
-5. Update `scion init --machine` to call `SeedHarnessConfig()` for all known harnesses.
-
-6. Update `scion init` (project-level) to be lightweight — no harness-config seeding.
-
-### 6.5 Phase 5: Default Template and Settings
-
-**Goal:** Ship default agnostic templates and update settings.
-
-1. Create a `default` agnostic template with generic agent instructions.
-
-2. Add `default_harness_config` to `settings.yaml` schema.
-
-3. Remove inline `harness_configs` from `settings.yaml` — no migration path needed as this block has no existing users.
-
-4. New templates can be created as agnostic: `scion template create my-template`.
-
-5. Provide a `scion harness-config reset <name>` command to restore defaults from embedded files.
+**Key references:** §3.3 (harness-config directories), §4.3 (settings/hooks), §5.3 (settings.yaml), §5.4 (user customization), §5.5 (initialization)
 
 ---
 
@@ -773,37 +692,14 @@ At the harness layer:
 
 ## 8. Migration Path
 
-Since this is a breaking change (alpha project), the migration is direct rather than phased:
+Since this is a breaking change (alpha project), the migration is direct. The implementation phases in §6 are designed to be progressive — each phase produces a working system. The migration corresponds to completing all four phases:
 
-### Step 1: Infrastructure
-- Create on-disk `harness-configs/` directory structure
-- Move harness embeds to `pkg/harness/<harness>/embeds/`
-- Implement `SeedHarnessConfig()` and `InitMachine()`
-- Add `InjectAgentInstructions()` and `InjectSystemPrompt()` to harness interface
-- Add `.zshrc` to common files
+1. **Phase 1** establishes harness-config infrastructure alongside the existing system (no breaking changes)
+2. **Phase 2** introduces the new template format and harness injection methods (breaking change: templates with `harness` field become invalid)
+3. **Phase 3** replaces the provisioning flow with the new composition model
+4. **Phase 4** restructures initialization and settings to complete the transition
 
-### Step 2: Template Format
-- Update `scion-agent.yaml` schema (remove `harness`, add `agent_instructions`, `system_prompt`, `default_harness_config`)
-- Error on templates with legacy `harness` field
-- Implement template validation for required fields
-
-### Step 3: Composition & Provisioning
-- Implement harness-config resolution chain
-- Build composition flow (harness-config base + template overlay)
-- Wire into `ProvisionAgent()`
-
-### Step 4: Commands & Settings
-- Add `--harness-config` flag to `scion create`
-- Add `default_harness_config` to settings
-- Remove inline `harness_configs` from settings (no migration needed)
-- Implement `scion init --machine`
-- Make `scion init` (project-level) lightweight
-- Add `scion harness-config reset <name>`
-
-### Step 5: Default Templates
-- Create default agnostic template with `agents.md` and `system-prompt.md`
-- Ship default harness-configs for all supported harnesses
-- Remove legacy per-harness templates from `pkg/config/embeds/`
+Existing user templates with a `harness` field will produce a clear error after Phase 2 directing the user to remove the field and use `--harness-config` instead. No automated migration tool is provided given the project's alpha status.
 
 ---
 
