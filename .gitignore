@@ -13,6 +13,7 @@ TEST_GEMINI_KEY
 # web frontend
 web/node_modules/
 web/dist/
+web/public/assets/
 
 # docs site
 docs-site/node_modules/
