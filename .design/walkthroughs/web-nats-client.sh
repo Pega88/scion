@@ -32,8 +32,6 @@ set -euo pipefail
 
 WEB_PORT="${PORT:-8080}"
 BASE_URL="http://localhost:${WEB_PORT}"
-NATS_CONTAINER="${NATS_CONTAINER:-scion-nats}"
-
 # Test grove/agent IDs used throughout
 TEST_GROVE="test-grove"
 TEST_AGENT="agent-001"
@@ -247,21 +245,17 @@ cmd_errors() {
     echo ""
 
     # NATS unavailable → 503
-    step "NATS unavailable (expect 503)"
-    info "Stopping NATS container to test unavailability..."
-    docker stop "${NATS_CONTAINER}" 2>/dev/null || warn "Could not stop NATS container"
-    sleep 3
-    info "Expected: 503 — Real-time event service is not available"
+    # This test requires NATS to be stopped externally. If NATS is currently
+    # down, the request should return 503. Otherwise this step is informational.
+    step "NATS unavailable (expect 503 when NATS is down)"
+    info "To test this case, stop your NATS server externally, then re-run:"
+    info "  ./web-nats-client.sh errors"
+    info ""
+    info "Checking current response:"
     echo ""
     curl -s -w '\nHTTP Status: %{http_code}\n' \
         -H "Cookie: ${SESSION_COOKIE}" \
         "${BASE_URL}/events?sub=grove.test.>" | jq . 2>/dev/null || true
-    echo ""
-
-    info "Restarting NATS container..."
-    docker start "${NATS_CONTAINER}" 2>/dev/null || warn "Could not start NATS container"
-    sleep 2
-    ok "NATS container restarted"
 }
 
 # ---------------------------------------------------------------------------
@@ -390,29 +384,26 @@ cmd_lifecycle() {
     echo ""
 
     # 6.3 NATS reconnection
-    step "6.3 NATS Reconnection"
-    info "This test stops NATS, waits, then restarts it."
-    info "Watch the web server logs for:"
-    info "  [NATS] Disconnected"
-    info "  [NATS] Reconnecting..."
-    info "  [NATS] Reconnected"
+    # This test requires manually stopping and restarting NATS externally.
+    step "6.3 NATS Reconnection (manual)"
+    info "To test NATS reconnection:"
+    info "  1. Stop your NATS server"
+    info "  2. Watch web server logs for:"
+    info "       [NATS] Disconnected"
+    info "       [NATS] Reconnecting..."
+    info "  3. Restart your NATS server"
+    info "  4. Watch web server logs for:"
+    info "       [NATS] Reconnected"
+    info "  5. Publish a message — it should arrive on the SSE stream"
     echo ""
-
-    info "Stopping NATS..."
-    docker stop "${NATS_CONTAINER}" 2>/dev/null || true
-    sleep 3
-
-    info "Restarting NATS..."
-    docker start "${NATS_CONTAINER}" 2>/dev/null || true
-    sleep 3
-
-    # Verify readiness recovered
+    info "Current /readyz status:"
     local readyz_code
     readyz_code=$(curl -s -o /dev/null -w '%{http_code}' "${BASE_URL}/readyz" 2>/dev/null || echo "000")
+    curl -s "${BASE_URL}/readyz" | jq . 2>/dev/null || curl -s "${BASE_URL}/readyz"
     if [ "$readyz_code" = "200" ]; then
-        ok "NATS reconnected — /readyz is healthy"
+        ok "/readyz is healthy (HTTP ${readyz_code})"
     else
-        warn "/readyz returned HTTP ${readyz_code} — reconnection may still be in progress"
+        warn "/readyz returned HTTP ${readyz_code}"
     fi
     echo ""
 
@@ -509,10 +500,10 @@ cmd_degraded() {
 #
 # 8.5 Reconnection Behavior
 #   1. Open a grove page in the browser
-#   2. Stop NATS: docker stop scion-nats
+#   2. Stop your NATS server
 #   3. Console shows: [SSE] Reconnecting in Xms (attempt N)
 #   4. Verify exponential backoff: 1s, 2s, 4s, 8s, 16s, 30s (capped)
-#   5. Restart NATS: docker start scion-nats
+#   5. Restart your NATS server
 #   6. Verify [SSE] Connected appears and events resume
 #
 # 8.6 Page Unload Cleanup
@@ -627,7 +618,6 @@ usage() {
     echo "Environment:"
     echo "  PORT              Web server port (default: 8080)"
     echo "  SESSION_COOKIE    Pre-set session cookie (auto-obtained if not set)"
-    echo "  NATS_CONTAINER    NATS container name (default: scion-nats)"
 }
 
 case "${1:-}" in
