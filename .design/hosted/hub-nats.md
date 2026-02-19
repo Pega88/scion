@@ -694,18 +694,23 @@ The publisher implementation is chosen at startup based on configuration:
 
 | Configuration | Publisher | SSE Delivery |
 |---------------|----------|-------------|
-| No NATS URL, `--enable-web` | `ChannelEventPublisher` | In-process (default) |
-| `--nats-url` provided | `NATSEventPublisher` | Via NATS (multi-node or external BFF) |
+| No NATS URL, `--enable-web` | `ChannelEventPublisher` | In-process (default, single-node) |
+| `--enable-web`, Postgres DB | `PostgresEventPublisher` | Via LISTEN/NOTIFY (multi-node, zero new deps) |
+| `--nats-url` provided | `NATSEventPublisher` | Via NATS (dedicated pub/sub server) |
 | Neither | `nil` (no-op) | No real-time updates |
 
 ```go
 // In cmd/server.go initialization
 if natsURL != "" {
-    // Multi-node: use NATS for cross-process fan-out
+    // Dedicated pub/sub: use NATS for high-throughput fan-out
     publisher, _ := hub.NewNATSEventPublisher(natsURL, natsToken)
     hubSrv.SetEventPublisher(publisher)
+} else if enableWeb && isPostgres(db) {
+    // Multi-node: use Postgres LISTEN/NOTIFY (zero new deps)
+    publisher := hub.NewPostgresEventPublisher(pool)
+    hubSrv.SetEventPublisher(publisher)
 } else if enableWeb {
-    // Single-node: use in-process channels (no NATS needed)
+    // Single-node: use in-process channels
     publisher := hub.NewChannelEventPublisher()
     hubSrv.SetEventPublisher(publisher)
 }
@@ -738,7 +743,7 @@ If cross-process event delivery is needed in the future, or a more structured in
 | **Go channels** | 0 | 0 | Yes | No | Custom (~40 lines) |
 | **mangos/v3** (nanomsg) | ~2 MB | 2 | Yes (`inproc://`) | Yes (`tcp://`, `ipc://`) | Prefix match (built-in) |
 | **Hub serves SSE directly** | 0 | 0 | Yes | N/A | Custom |
-| **PostgreSQL `LISTEN/NOTIFY`** | 0 | Postgres | No | Yes | Channel name only |
+| **PostgreSQL `LISTEN/NOTIFY`** | 0 | 0 (Postgres already required) | No | Yes | Channel name only |
 | **Redis Pub/Sub** | varies | Redis | No | Yes | Pattern match |
 | **nats.go client** | ~5 MB | 3 | No | Yes (needs server) | Wildcards (`*`, `>`) |
 | **Embedded NATS server** | ~15 MB | 11 | Yes | Yes | Wildcards (`*`, `>`) |
@@ -787,9 +792,121 @@ For Scion's current architecture (single Hub process, SSE endpoint co-located), 
 
 For Scion, the "Hub serves SSE directly" row is the key insight: since the Hub is the single source of truth and serves the SSE endpoint, there is no need for a pub/sub intermediary at all. The `ChannelEventPublisher` (in-process Go channels) is sufficient for the current stage.
 
+##### PostgreSQL LISTEN/NOTIFY (preferred scaling path)
+
+If the production database is PostgreSQL, `LISTEN/NOTIFY` is the preferred path for scaling beyond the single-process `ChannelEventPublisher`. It adds zero new dependencies — Postgres is already a runtime requirement — and solves horizontal scaling (multiple Hub instances) without introducing a separate pub/sub server.
+
+**Key advantage: transactional publish.** The design principle "publish after commit" requires careful sequencing with external pub/sub systems — write to the database, then publish to NATS/mangos, with a failure window between the two operations. PostgreSQL eliminates this gap entirely. `NOTIFY` issued inside the same transaction as the database write is held by Postgres until commit and discarded on rollback. The write and the notification are atomic:
+
+```go
+// Atomic write + publish in a single transaction
+tx, _ := pool.Begin(ctx)
+_, _ = tx.Exec(ctx, `UPDATE agents SET status = $1 WHERE id = $2`, status, agentID)
+_, _ = tx.Exec(ctx, `SELECT pg_notify($1, $2)`, "grove:"+groveID, payload)
+tx.Commit(ctx)  // Both the write and notification happen, or neither does
+```
+
+This is strictly better than the two-phase approach required by every external pub/sub option.
+
+**How it maps to the subject hierarchy:**
+
+PostgreSQL channels are flat strings with exact-match only — no NATS-style wildcards. The practical approach is to use per-grove channels with the event type embedded in the JSON payload:
+
+| NATS Subject | Postgres Channel | Payload Wrapper |
+|-------------|-----------------|----------------|
+| `grove.{id}.agent.status` | `grove:{groveId}` | `{"type":"agent.status","data":{...}}` |
+| `grove.{id}.agent.created` | `grove:{groveId}` | `{"type":"agent.created","data":{...}}` |
+| `grove.{id}.broker.connected` | `grove:{groveId}` | `{"type":"broker.connected","data":{...}}` |
+| `agent.{id}.status` | `agent:{agentId}` | `{"type":"status","data":{...}}` |
+| `broker.{id}.status` | `broker:{brokerId}` | `{"type":"status","data":{...}}` |
+
+The SSE endpoint already subscribes at grove granularity for the dashboard view. Client-side filtering by event type is trivial and the payloads are small.
+
+**Implementation sketch:**
+
+The `EventPublisher` interface stays unchanged. A `PostgresEventPublisher` replaces the transport:
+
+```go
+type PostgresEventPublisher struct {
+    pool *pgxpool.Pool
+}
+
+func (p *PostgresEventPublisher) PublishAgentStatus(ctx context.Context, agent *store.Agent) {
+    if p == nil {
+        return
+    }
+    event := AgentStatusEvent{AgentID: agent.ID, Status: agent.Status, ...}
+    data, _ := json.Marshal(event)
+    payload := fmt.Sprintf(`{"type":"agent.status","data":%s}`, data)
+
+    // Dual-publish: grove-scoped and agent-scoped channels
+    p.notify(ctx, "grove:"+agent.GroveID, payload)
+    p.notify(ctx, "agent:"+agent.ID, payload)
+}
+
+func (p *PostgresEventPublisher) notify(ctx context.Context, channel, payload string) {
+    if _, err := p.pool.Exec(ctx, "SELECT pg_notify($1, $2)", channel, payload); err != nil {
+        slog.Error("Failed to publish event", "channel", channel, "error", err)
+    }
+}
+```
+
+For the SSE subscriber side, a single dedicated connection listens for notifications and fans out to in-process SSE clients:
+
+```go
+func (s *Server) listenGroveEvents(ctx context.Context, groveID string) (<-chan Event, func(), error) {
+    conn, _ := s.pool.Acquire(ctx)
+    _, _ = conn.Exec(ctx, fmt.Sprintf(`LISTEN "grove:%s"`, groveID))
+
+    ch := make(chan Event, 64)
+    go func() {
+        defer conn.Release()
+        defer close(ch)
+        for {
+            notification, err := conn.Conn().WaitForNotification(ctx)
+            if err != nil {
+                return
+            }
+            ch <- Event{Subject: notification.Channel, Data: []byte(notification.Payload)}
+        }
+    }()
+
+    unsubscribe := func() {
+        conn.Exec(ctx, fmt.Sprintf(`UNLISTEN "grove:%s"`, groveID))
+        conn.Release()
+    }
+    return ch, unsubscribe, nil
+}
+```
+
+**Constraints:**
+
+- **8,000 byte payload limit.** All current event types are well under 1 KB. The 8 KB limit only affects heavy harness events (`agent.{id}.event`) which are out of scope for this design.
+- **Dedicated listener connection.** Each LISTEN session requires a connection that can't be returned to the pool. The recommended pattern is one shared listener connection per Hub instance that fans out to all SSE clients in-process — not one Postgres connection per browser.
+- **Flat channel names.** No wildcard subscriptions. A dashboard wanting all grove events needs one `LISTEN` per grove, or a single broadcast channel with client-side filtering. For a typical deployment with tens of groves, per-grove channels are practical.
+- **Database load.** Notifications flow through Postgres. For the event volumes in this design (agent CRUD, status changes — tens per second at peak), this is negligible. It would become a concern only at thousands of notifications per second.
+
+**When to move beyond Postgres LISTEN/NOTIFY:**
+
+- Notification throughput exceeds thousands per second sustained.
+- Heavy payloads (>8 KB) need pub/sub delivery (harness events).
+- Multi-database-cluster deployments where the Hubs don't share a single Postgres instance.
+- Sophisticated topic routing (NATS-style wildcards across many dimensions) becomes a hard requirement.
+
+None of these are near-term concerns for Scion.
+
 #### Recommendation
 
-**Start with `ChannelEventPublisher` only.** Do not add NATS as a dependency until there is a concrete multi-node requirement. The `EventPublisher` interface allows swapping in `NATSEventPublisher` later without changing any handler code. YAGNI applies here — the interface abstraction provides the escape hatch; the dependency can wait.
+**Start with `ChannelEventPublisher` only.** When horizontal scaling is needed (multiple Hub instances), move to `PostgresEventPublisher` using `LISTEN/NOTIFY` on the existing production database. This adds zero new dependencies, provides atomic write+publish semantics that are strictly better than external pub/sub, and solves the multi-process fan-out problem. The `EventPublisher` interface allows swapping implementations without changing any handler code.
+
+Reserve NATS for the case where Scion outgrows what Postgres can deliver — multi-database-cluster deployments, very high notification throughput, or heavy-payload pub/sub. The interface abstraction provides the escape hatch; the dependency can wait.
+
+**Scaling path:**
+
+```
+ChannelEventPublisher       →  PostgresEventPublisher     →  NATSEventPublisher
+(Go channels, single proc)     (LISTEN/NOTIFY, zero deps)    (dedicated pub/sub server)
+```
 
 ### SSR Decision
 
