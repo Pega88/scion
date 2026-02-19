@@ -14,6 +14,11 @@
 # limitations under the License.
 
 # hack/gce-setup-nats.sh - Setup NATS Server with systemd on GCE demo instance
+#
+# ARCHIVED: This script is superseded by the in-process ChannelEventPublisher
+# (pkg/hub/events.go). The Go binary now handles real-time event distribution
+# directly, eliminating the need for a standalone NATS server. This script is
+# retained for historical reference only.
 
 set -euo pipefail
 

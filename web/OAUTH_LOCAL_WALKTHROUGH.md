@@ -25,51 +25,50 @@ First, you need to create credentials in your provider's developer console.
 
 ## 2. Configuration
 
-You can configure the web server using environment variables. The easiest way is to create a shell script or use an `.env` file (if supported by your environment).
-
-### Disable Dev Auth
-By default, the web server enables "Dev Auth" which auto-logs you in as a development user. To test real OAuth, you should disable it:
-
-```bash
-export SCION_DEV_AUTH_ENABLED=false
-```
+The Go server is configured via environment variables and CLI flags.
 
 ### Set Provider Credentials
-Set the credentials for the provider(s) you want to test:
+
+Create or update your `~/.scion/hub.env` file with provider credentials:
 
 ```bash
-# Google
-export GOOGLE_CLIENT_ID="your-client-id"
-export GOOGLE_CLIENT_SECRET="your-client-secret"
+GOOGLE_CLIENT_ID=your-client-id
+GOOGLE_CLIENT_SECRET=your-client-secret
+GITHUB_CLIENT_ID=your-client-id
+GITHUB_CLIENT_SECRET=your-client-secret
+SESSION_SECRET=a-long-random-string
+```
 
-# GitHub
-export GITHUB_CLIENT_ID="your-client-id"
-export GITHUB_CLIENT_SECRET="your-client-secret"
+Or export them directly:
+
+```bash
+export SCION_SERVER_AUTH_GOOGLE_CLIENTID="your-client-id"
+export SCION_SERVER_AUTH_GOOGLE_CLIENTSECRET="your-client-secret"
+export SCION_SERVER_AUTH_GITHUB_CLIENTID="your-client-id"
+export SCION_SERVER_AUTH_GITHUB_CLIENTSECRET="your-client-secret"
 ```
 
 ### Optional: Authorized Domains
-If you want to restrict login to specific email domains (e.g., your company domain):
+To restrict login to specific email domains:
 
 ```bash
-export SCION_AUTHORIZED_DOMAINS="example.com,mycompany.org"
+export SCION_SERVER_AUTH_AUTHORIZEDDOMAINS="example.com,mycompany.org"
 ```
 
 ## 3. Running the Server
 
-1. **Install dependencies** (if you haven't already):
-   ```bash
-   cd web
-   npm install
-   ```
+Start the Go server with the web UI and hub enabled:
 
-2. **Build and start the server** with your environment variables:
-   ```bash
-   # Run with variables
-   SCION_DEV_AUTH_ENABLED=false \
-   GOOGLE_CLIENT_ID="xxx" \
-   GOOGLE_CLIENT_SECRET="yyy" \
-   npm run build && npm start
-   ```
+```bash
+scion server start --enable-web --enable-hub --web-port 8080 --session-secret "your-secret"
+```
+
+Or with environment variables from hub.env:
+
+```bash
+source ~/.scion/hub.env
+scion server start --enable-web --enable-hub --web-port 8080 --session-secret "$SESSION_SECRET"
+```
 
 ## 4. Testing the Flow
 
@@ -82,9 +81,6 @@ export SCION_AUTHORIZED_DOMAINS="example.com,mycompany.org"
 ### Troubleshooting
 
 - **Redirect URI Mismatch**: Ensure the redirect URI in your provider's console matches exactly: `http://localhost:8080/auth/callback/<provider>`.
-- **Port Conflict**: If you change the `PORT` environment variable, update your redirect URIs accordingly.
-- **Session Secret**: For a consistent experience across restarts, you can set a `SESSION_SECRET`:
-  ```bash
-  export SESSION_SECRET="a-long-random-string"
-  ```
-- **Authorized Domains**: If you set `SCION_AUTHORIZED_DOMAINS` and your login email doesn't match, you'll see an error message.
+- **Port Conflict**: If you change the web port, update your redirect URIs accordingly.
+- **Session Secret**: For a consistent experience across restarts, always set `--session-secret` or `SESSION_SECRET`.
+- **Authorized Domains**: If you set authorized domains and your login email doesn't match, you'll see an error message.

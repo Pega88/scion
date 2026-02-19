@@ -18,9 +18,6 @@
             "DOM",
             "DOM.Iterable"
         ],
-        "types": [
-            "node"
-        ],
         "experimentalDecorators": true,
         "useDefineForClassFields": false,
         "noUnusedLocals": true,
@@ -30,7 +27,11 @@
         "exactOptionalPropertyTypes": true
     },
     "include": [
-        "src/**/*"
+        "src/client/**/*",
+        "src/components/**/*",
+        "src/shared/**/*",
+        "src/styles/**/*",
+        "src/vite-env.d.ts"
     ],
     "exclude": [
         "node_modules",

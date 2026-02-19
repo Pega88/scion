@@ -124,7 +124,7 @@ export class StateManager extends EventTarget {
   }
 
   /**
-   * Map view scope to NATS subject patterns.
+   * Map view scope to event subject patterns.
    * Matches the subscription tiers defined in §12.2.
    */
   private subjectsForScope(scope: ViewScope): string[] {
@@ -157,7 +157,7 @@ export class StateManager extends EventTarget {
   /**
    * Handle delta updates from SSE.
    * The server sends events with structure: { subject: string, data: unknown }
-   * Subject format follows the NATS schema in §12.3.
+   * Subject format follows the event schema in §12.3.
    */
   private handleUpdate(update: SSEUpdateEvent): void {
     const { subject, data } = update;

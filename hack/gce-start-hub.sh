@@ -59,7 +59,7 @@ fi
 TMP_SERVICE=$(mktemp)
 printf "[Unit]
 Description=Scion Hub API Server
-After=network.target nats-server.service
+After=network.target
 
 [Service]
 User=scion
@@ -72,7 +72,7 @@ Environment=\"SCION_SERVER_AUTH_AUTHORIZEDDOMAINS=google.com\"
 StandardOutput=journal
 StandardError=journal
 ExecStartPre=/usr/bin/env
-ExecStart=%s --global server start --debug --enable-hub --enable-runtime-broker --port 9810 --runtime-broker-port 9800 --auto-provide
+ExecStart=%s --global server start --debug --enable-hub --enable-runtime-broker --enable-web --port 9810 --runtime-broker-port 9800 --web-port 8080 --session-secret \${SESSION_SECRET} --auto-provide
 Restart=always
 RestartSec=5
 
@@ -87,7 +87,20 @@ rm "$TMP_SERVICE"
 TMP_CADDY=$(mktemp)
 cat <<EOF > "$TMP_CADDY"
 hub.demo.scion-ai.dev {
-    reverse_proxy localhost:9810
+    # Hub API routes
+    handle /api/* {
+        reverse_proxy localhost:9810
+    }
+    handle /healthz {
+        reverse_proxy localhost:9810
+    }
+    handle /metrics {
+        reverse_proxy localhost:9810
+    }
+    # Web UI (all other routes)
+    handle {
+        reverse_proxy localhost:8080
+    }
     tls /etc/letsencrypt/live/demo.scion-ai.dev/fullchain.pem /etc/letsencrypt/live/demo.scion-ai.dev/privkey.pem
 }
 EOF

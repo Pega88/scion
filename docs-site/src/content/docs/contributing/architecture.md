@@ -480,14 +480,14 @@ The web dashboard (`web/`) provides a visual interface for Hosted mode operation
 
 | Layer | Technology | Location |
 | :--- | :--- | :--- |
-| Client SPA | React + TypeScript + Vite | `web/src/client/` |
-| Server (BFF/SSR) | Node.js + Koa | `web/src/server/` |
+| Client SPA | Lit + TypeScript + Vite | `web/src/client/` |
+| Server | Go (consolidated into the `scion` binary) | `pkg/hub/web.go` |
 
-The server layer provides:
-- Server-side rendering via `web/src/server/ssr/`.
-- API proxy routes (`web/src/server/routes/api.ts`) that forward to the Hub.
-- Authentication middleware (session-based, with dev auth support).
-- Health check endpoints.
+The server layer (enabled via `--enable-web`) provides:
+- Static asset serving and SPA shell rendering.
+- OAuth authentication and session management.
+- SSE real-time event streaming via `pkg/hub/events.go`.
+- API routing to the Hub.
 
 ---
 

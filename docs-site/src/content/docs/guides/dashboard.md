@@ -39,4 +39,4 @@ The dashboard supports several authentication methods:
 See the [Authentication Guide](/guides/auth) for setup instructions.
 
 ## API Proxying
-The dashboard BFF (Backend-for-Frontend) acts as a secure proxy for the Hub API, handling token injection and session management so the browser never handles raw API keys or long-lived tokens directly.
+The Go server handles API proxying, token injection, and session management so the browser never handles raw API keys or long-lived tokens directly.

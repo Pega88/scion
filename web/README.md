@@ -2,10 +2,15 @@
 
 Browser-based dashboard for managing Scion agents and groves.
 
+## Architecture
+
+The web frontend is a client-side single-page application (SPA) built with Lit web components. Node.js is used only at build time (Vite compiles and bundles client assets). At runtime, the Go `scion` binary serves the compiled assets and handles all server-side concerns (OAuth, sessions, SSE, API routing) via the `--enable-web` flag.
+
 ## Prerequisites
 
-- Node.js 20.x or later
+- Node.js 20.x or later (build-time only)
 - npm 10.x or later
+- Go 1.22+ (for running the server)
 
 ## Getting Started
 
@@ -15,100 +20,64 @@ Browser-based dashboard for managing Scion agents and groves.
 npm install
 ```
 
-### Development
-
-Start the development server with hot reload:
-
-```bash
-npm run dev
-```
-
-The server will be available at `http://localhost:8080`.
-
-### Build
-
-Build for production:
+### Build Client Assets
 
 ```bash
 npm run build
 ```
 
-### Production
-
-Start the production server:
+### Run the Server
 
 ```bash
-npm run start
+# From the repository root
+scion server start --enable-web --enable-hub --port 9810 --web-port 8080
 ```
+
+The dashboard will be available at `http://localhost:8080`.
 
 ## Available Scripts
 
 | Script | Description |
 |--------|-------------|
-| `npm run dev` | Start development server with hot reload |
-| `npm run build` | Build for production |
-| `npm start` | Start production server |
+| `npm run dev` | Start Vite dev server with hot reload |
+| `npm run build` | Build client assets for production |
+| `npm run build:dev` | Build client assets in development mode |
 | `npm run lint` | Run ESLint |
 | `npm run lint:fix` | Run ESLint with auto-fix |
 | `npm run format` | Format code with Prettier |
+| `npm run format:check` | Check code formatting |
 | `npm run typecheck` | Run TypeScript type checking |
-
-## Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PORT` | `8080` | Server port |
-| `HOST` | `0.0.0.0` | Server hostname |
-| `NODE_ENV` | `development` | Environment (development/production) |
-| `HUB_API_URL` | `http://localhost:9810` | Hub API URL |
-| `CORS_ORIGIN` | `*` | CORS allowed origins |
-
-## API Endpoints
-
-### Health Checks
-
-- `GET /healthz` - Liveness probe
-- `GET /readyz` - Readiness probe
-
-### Static Assets
-
-- `GET /assets/*` - Static files from the public directory
+| `npm run clean` | Remove node_modules, dist, and public/assets |
 
 ## Project Structure
 
 ```
 web/
 ├── src/
-│   ├── server/              # Koa server
-│   │   ├── index.ts         # Entry point
-│   │   ├── app.ts           # Koa app setup
-│   │   ├── config.ts        # Configuration
-│   │   ├── middleware/      # Middleware
-│   │   │   ├── error-handler.ts
-│   │   │   ├── logger.ts
-│   │   │   └── security.ts
-│   │   └── routes/          # Route handlers
-│   │       └── health.ts
-│   └── client/              # Client-side code
-│       └── main.ts
-├── public/                   # Static assets
-│   └── assets/
+│   ├── client/              # Browser-side code
+│   │   ├── main.ts          # Client entry point (hydration)
+│   │   ├── state.ts         # State manager with SSE subscriptions
+│   │   └── sse-client.ts    # SSE client for real-time updates
+│   ├── components/          # Lit web components
+│   │   ├── app-shell.ts     # Main application shell
+│   │   ├── shared/          # Reusable UI components
+│   │   └── pages/           # Page components
+│   ├── styles/              # CSS theme and utilities
+│   │   ├── theme.css        # CSS custom properties, light/dark mode
+│   │   └── utilities.css    # Utility classes
+│   └── shared/              # Shared types
+│       └── types.ts         # Type definitions
+├── public/                  # Static assets (built output copied here)
 ├── package.json
 ├── tsconfig.json
-├── tsconfig.server.json
 └── vite.config.ts
 ```
 
-## Milestone Status
+## Server Configuration
 
-- [x] **M1: Koa Server Foundation** - Complete
-- [ ] M2: Lit SSR Integration
-- [ ] M3: Web Awesome Component Library
-- [ ] M4: Authentication Flow
-- [ ] M5: Hub API Proxy
-- [ ] M6: Grove & Agent Pages
-- [ ] M7: SSE + NATS Real-Time Updates
-- [ ] M8: Terminal Component
-- [ ] M9: Agent Creation Workflow
-- [ ] M10: Production Hardening
-- [ ] M11: Cloud Run Deployment
+The Go server is configured via CLI flags and environment variables. See the [Web Dashboard Configuration](/reference/web-config) docs for details.
+
+Key flags:
+- `--enable-web` — Enable the web dashboard
+- `--web-port` — Port for the web UI (default: 8080)
+- `--session-secret` — Secret for signing session cookies (required in production)
