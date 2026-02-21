@@ -844,13 +844,16 @@ func gatherAndSubmitEnv(ctx context.Context, hubCtx *HubContext, groveID string,
 	}
 
 	// Print summary of env status
-	statusln("\nEnvironment variable resolution:")
 	if len(gather.HubHas) > 0 {
+		statusln("\nEnvironment variables already provided:")
 		for _, src := range gather.HubHas {
 			statusf("  %s — provided by Hub (%s)\n", src.Key, src.Scope)
 		}
 	}
 	if len(gather.BrokerHas) > 0 {
+		if len(gather.HubHas) == 0 {
+			statusln("\nEnvironment variables already provided:")
+		}
 		for _, key := range gather.BrokerHas {
 			statusf("  %s — provided by Broker\n", key)
 		}
@@ -862,9 +865,15 @@ func gatherAndSubmitEnv(ctx context.Context, hubCtx *HubContext, groveID string,
 	for _, key := range gather.Needs {
 		if val := os.Getenv(key); val != "" {
 			gatheredEnv[key] = val
-			statusf("  %s — found in local environment\n", key)
 		} else {
 			missingKeys = append(missingKeys, key)
+		}
+	}
+
+	if len(gatheredEnv) > 0 {
+		statusln("\nRequired variables for this agent were not provided in the template, hub, or broker, but are available in our current environment:")
+		for key := range gatheredEnv {
+			statusf("  %s — found in local environment\n", key)
 		}
 	}
 
@@ -891,7 +900,7 @@ func gatherAndSubmitEnv(ctx context.Context, hubCtx *HubContext, groveID string,
 	// In interactive mode, confirm before sending env vars
 	if util.IsTerminal() && !autoConfirm {
 		reader := bufio.NewReader(os.Stdin)
-		fmt.Fprintf(os.Stderr, "\nSend %d environment variable(s) to the Hub? [Y/n]: ", len(gatheredEnv))
+		fmt.Fprintf(os.Stderr, "\nSend %d environment variable(s) to use in provisioning this agent? (will not be stored) [Y/n]: ", len(gatheredEnv))
 		input, err := reader.ReadString('\n')
 		if err != nil {
 			return nil, fmt.Errorf("failed to read input: %w", err)
