@@ -106,6 +106,24 @@ func (s *Supervisor) Run(ctx context.Context, args []string) (int, error) {
 		}
 	}
 
+	// Apply SCION_EXTRA_PATH: prepend its value to PATH, then remove it from env.
+	// Initialize s.cmd.Env from os.Environ() if the privilege-drop block above didn't set it.
+	if s.cmd.Env == nil {
+		s.cmd.Env = os.Environ()
+	}
+	if extraPath := getEnvVar(s.cmd.Env, "SCION_EXTRA_PATH"); extraPath != "" {
+		currentPath := getEnvVar(s.cmd.Env, "PATH")
+		var newPath string
+		if currentPath != "" {
+			newPath = extraPath + ":" + currentPath
+		} else {
+			newPath = extraPath
+		}
+		s.cmd.Env = setEnvVar(s.cmd.Env, "PATH", newPath)
+		s.cmd.Env = removeEnvVar(s.cmd.Env, "SCION_EXTRA_PATH")
+		log.Debug("Applied SCION_EXTRA_PATH: PATH=%s", newPath)
+	}
+
 	if err := s.cmd.Start(); err != nil {
 		return 1, fmt.Errorf("failed to start command: %w", err)
 	}
@@ -245,4 +263,29 @@ func setEnvVar(env []string, key, value string) []string {
 		}
 	}
 	return append(env, prefix+value)
+}
+
+// getEnvVar returns the value of an environment variable from a list of KEY=VALUE strings.
+// Returns empty string if the key is not found.
+func getEnvVar(env []string, key string) string {
+	prefix := key + "="
+	for _, e := range env {
+		if len(e) >= len(prefix) && e[:len(prefix)] == prefix {
+			return e[len(prefix):]
+		}
+	}
+	return ""
+}
+
+// removeEnvVar removes an environment variable from a list of KEY=VALUE strings.
+func removeEnvVar(env []string, key string) []string {
+	prefix := key + "="
+	result := env[:0:0]
+	for _, e := range env {
+		if len(e) >= len(prefix) && e[:len(prefix)] == prefix {
+			continue
+		}
+		result = append(result, e)
+	}
+	return result
 }

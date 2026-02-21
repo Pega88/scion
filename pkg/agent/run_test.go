@@ -195,6 +195,40 @@ func TestBuildAgentEnv(t *testing.T) {
 	}
 }
 
+func TestBuildAgentEnv_ScionExtraPath(t *testing.T) {
+	// SCION_EXTRA_PATH should pass through buildAgentEnv as a normal literal
+	// env var (no special expansion needed since the value is a literal
+	// container path like /home/scion/bin).
+	scionCfg := &api.ScionConfig{
+		Env: map[string]string{
+			"SCION_EXTRA_PATH": "/home/scion/bin",
+		},
+	}
+
+	env, warnings := buildAgentEnv(scionCfg, nil)
+
+	envMap := make(map[string]string)
+	for _, e := range env {
+		parts := strings.SplitN(e, "=", 2)
+		if len(parts) == 2 {
+			envMap[parts[0]] = parts[1]
+		}
+	}
+
+	if got, ok := envMap["SCION_EXTRA_PATH"]; !ok {
+		t.Error("expected SCION_EXTRA_PATH to be present in env")
+	} else if got != "/home/scion/bin" {
+		t.Errorf("SCION_EXTRA_PATH = %q, want %q", got, "/home/scion/bin")
+	}
+
+	// No warnings expected for a literal value
+	for _, w := range warnings {
+		if strings.Contains(w, "SCION_EXTRA_PATH") {
+			t.Errorf("unexpected warning for SCION_EXTRA_PATH: %s", w)
+		}
+	}
+}
+
 func TestBuildAgentEnv_HubEndpointOverride(t *testing.T) {
 	t.Run("scion config hub endpoint overrides extraEnv", func(t *testing.T) {
 		scionCfg := &api.ScionConfig{

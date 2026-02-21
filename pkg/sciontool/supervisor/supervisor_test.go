@@ -190,3 +190,142 @@ func TestDefaultConfig(t *testing.T) {
 		t.Errorf("expected default grace period 10s, got %s", config.GracePeriod)
 	}
 }
+
+func TestSetEnvVar(t *testing.T) {
+	t.Run("replaces existing var", func(t *testing.T) {
+		env := []string{"FOO=bar", "PATH=/usr/bin"}
+		env = setEnvVar(env, "FOO", "baz")
+		if len(env) != 2 {
+			t.Fatalf("expected 2 entries, got %d", len(env))
+		}
+		if env[0] != "FOO=baz" {
+			t.Errorf("expected FOO=baz, got %s", env[0])
+		}
+	})
+
+	t.Run("appends new var", func(t *testing.T) {
+		env := []string{"FOO=bar"}
+		env = setEnvVar(env, "NEW", "value")
+		if len(env) != 2 {
+			t.Fatalf("expected 2 entries, got %d", len(env))
+		}
+		if env[1] != "NEW=value" {
+			t.Errorf("expected NEW=value, got %s", env[1])
+		}
+	})
+}
+
+func TestGetEnvVar(t *testing.T) {
+	env := []string{"FOO=bar", "EMPTY=", "PATH=/usr/bin:/usr/local/bin"}
+
+	t.Run("found", func(t *testing.T) {
+		if got := getEnvVar(env, "FOO"); got != "bar" {
+			t.Errorf("expected 'bar', got %q", got)
+		}
+	})
+
+	t.Run("not found", func(t *testing.T) {
+		if got := getEnvVar(env, "MISSING"); got != "" {
+			t.Errorf("expected empty string, got %q", got)
+		}
+	})
+
+	t.Run("empty value", func(t *testing.T) {
+		if got := getEnvVar(env, "EMPTY"); got != "" {
+			t.Errorf("expected empty string, got %q", got)
+		}
+	})
+
+	t.Run("value with special chars", func(t *testing.T) {
+		if got := getEnvVar(env, "PATH"); got != "/usr/bin:/usr/local/bin" {
+			t.Errorf("expected '/usr/bin:/usr/local/bin', got %q", got)
+		}
+	})
+}
+
+func TestRemoveEnvVar(t *testing.T) {
+	t.Run("removes present var", func(t *testing.T) {
+		env := []string{"FOO=bar", "BAZ=qux", "PATH=/usr/bin"}
+		result := removeEnvVar(env, "BAZ")
+		if len(result) != 2 {
+			t.Fatalf("expected 2 entries, got %d: %v", len(result), result)
+		}
+		for _, e := range result {
+			if e == "BAZ=qux" {
+				t.Error("BAZ should have been removed")
+			}
+		}
+	})
+
+	t.Run("no-op for absent var", func(t *testing.T) {
+		env := []string{"FOO=bar", "PATH=/usr/bin"}
+		result := removeEnvVar(env, "MISSING")
+		if len(result) != 2 {
+			t.Fatalf("expected 2 entries, got %d", len(result))
+		}
+	})
+}
+
+func TestApplyExtraPath(t *testing.T) {
+	t.Run("prepends to existing PATH", func(t *testing.T) {
+		env := []string{"PATH=/usr/bin", "SCION_EXTRA_PATH=/home/scion/bin"}
+		extraPath := getEnvVar(env, "SCION_EXTRA_PATH")
+		if extraPath == "" {
+			t.Fatal("SCION_EXTRA_PATH not found")
+		}
+		currentPath := getEnvVar(env, "PATH")
+		newPath := extraPath + ":" + currentPath
+		env = setEnvVar(env, "PATH", newPath)
+		env = removeEnvVar(env, "SCION_EXTRA_PATH")
+
+		if got := getEnvVar(env, "PATH"); got != "/home/scion/bin:/usr/bin" {
+			t.Errorf("expected '/home/scion/bin:/usr/bin', got %q", got)
+		}
+		if got := getEnvVar(env, "SCION_EXTRA_PATH"); got != "" {
+			t.Errorf("SCION_EXTRA_PATH should be removed, got %q", got)
+		}
+	})
+
+	t.Run("handles missing PATH", func(t *testing.T) {
+		env := []string{"SCION_EXTRA_PATH=/home/scion/bin"}
+		extraPath := getEnvVar(env, "SCION_EXTRA_PATH")
+		currentPath := getEnvVar(env, "PATH")
+		var newPath string
+		if currentPath != "" {
+			newPath = extraPath + ":" + currentPath
+		} else {
+			newPath = extraPath
+		}
+		env = setEnvVar(env, "PATH", newPath)
+		env = removeEnvVar(env, "SCION_EXTRA_PATH")
+
+		if got := getEnvVar(env, "PATH"); got != "/home/scion/bin" {
+			t.Errorf("expected '/home/scion/bin', got %q", got)
+		}
+	})
+
+	t.Run("handles multiple colon-separated entries", func(t *testing.T) {
+		env := []string{"PATH=/usr/bin", "SCION_EXTRA_PATH=/home/scion/bin:/home/scion/.local/bin"}
+		extraPath := getEnvVar(env, "SCION_EXTRA_PATH")
+		currentPath := getEnvVar(env, "PATH")
+		newPath := extraPath + ":" + currentPath
+		env = setEnvVar(env, "PATH", newPath)
+		env = removeEnvVar(env, "SCION_EXTRA_PATH")
+
+		if got := getEnvVar(env, "PATH"); got != "/home/scion/bin:/home/scion/.local/bin:/usr/bin" {
+			t.Errorf("expected '/home/scion/bin:/home/scion/.local/bin:/usr/bin', got %q", got)
+		}
+	})
+
+	t.Run("no SCION_EXTRA_PATH is no-op", func(t *testing.T) {
+		env := []string{"PATH=/usr/bin", "FOO=bar"}
+		extraPath := getEnvVar(env, "SCION_EXTRA_PATH")
+		if extraPath != "" {
+			t.Fatal("should not have found SCION_EXTRA_PATH")
+		}
+		// PATH should remain unchanged
+		if got := getEnvVar(env, "PATH"); got != "/usr/bin" {
+			t.Errorf("expected '/usr/bin', got %q", got)
+		}
+	})
+}
