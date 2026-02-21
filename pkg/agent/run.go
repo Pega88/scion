@@ -305,6 +305,20 @@ func (m *AgentManager) Start(ctx context.Context, opts api.StartOptions) (*api.A
 		}
 	}
 
+	// Explicit SCION_HUB_ENDPOINT in scion config env section takes
+	// final priority. This allows templates to specify a container-
+	// accessible endpoint (e.g. http://host.docker.internal:8080)
+	// that differs from the host-level hub endpoint.
+	if finalScionCfg != nil && finalScionCfg.Env != nil {
+		if ep, ok := finalScionCfg.Env["SCION_HUB_ENDPOINT"]; ok && ep != "" {
+			expandedEp, _ := util.ExpandEnv(ep)
+			if expandedEp != "" {
+				opts.Env["SCION_HUB_ENDPOINT"] = expandedEp
+				opts.Env["SCION_HUB_URL"] = expandedEp
+			}
+		}
+	}
+
 	// Inject telemetry config as env vars for sciontool.
 	// Only set vars not already present (respecting explicit overrides).
 	if finalScionCfg != nil && finalScionCfg.Telemetry != nil {

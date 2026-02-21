@@ -316,6 +316,22 @@ func RunAgent(cmd *cobra.Command, args []string, resume bool) error {
 		}
 	}
 
+	// Thread CLI-resolved hub endpoint so locally-started agents get
+	// hub connectivity. The --hub flag and host SCION_HUB_ENDPOINT env
+	// var are resolved here; the agent's scion-agent.yaml can override
+	// inside Start() via hub.endpoint or env.SCION_HUB_ENDPOINT.
+	if IsHubEnabled() {
+		if cliSettings, err := config.LoadSettings(grovePath); err == nil {
+			if ep := GetHubEndpoint(cliSettings); ep != "" {
+				if opts.Env == nil {
+					opts.Env = make(map[string]string)
+				}
+				opts.Env["SCION_HUB_ENDPOINT"] = ep
+				opts.Env["SCION_HUB_URL"] = ep
+			}
+		}
+	}
+
 	// We still might want to show some progress in the CLI
 	if !isJSONOutput() {
 		if resume {

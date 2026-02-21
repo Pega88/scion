@@ -1095,3 +1095,209 @@ profiles:
 		t.Errorf("SCION_HUB_ENDPOINT = %q, want %q (explicit should win over grove settings)", got, "http://broker-dispatch:9810")
 	}
 }
+
+func TestBuildAgentEnv_EnvKeyScionHubEndpointOverride(t *testing.T) {
+	// Unit test verifying that when scionCfg.Env has SCION_HUB_ENDPOINT and
+	// it's pre-applied to extraEnv (simulating the new run.go logic), the
+	// env-section value wins over the grove/broker value.
+	t.Run("env section SCION_HUB_ENDPOINT overrides all via pre-apply", func(t *testing.T) {
+		scionCfg := &api.ScionConfig{
+			Hub: &api.AgentHubConfig{
+				Endpoint: "https://hub-endpoint.example.com",
+			},
+			Env: map[string]string{
+				"SCION_HUB_ENDPOINT": "http://host.docker.internal:8080",
+			},
+		}
+
+		// Simulate the priority chain from Start():
+		// 1. CLI/grove settings sets initial value
+		extraEnv := map[string]string{
+			"SCION_HUB_ENDPOINT": "http://localhost:8080",
+			"SCION_HUB_URL":     "http://localhost:8080",
+		}
+
+		// 2. hub.endpoint overrides
+		if scionCfg.Hub != nil && scionCfg.Hub.Endpoint != "" {
+			extraEnv["SCION_HUB_ENDPOINT"] = scionCfg.Hub.Endpoint
+			extraEnv["SCION_HUB_URL"] = scionCfg.Hub.Endpoint
+		}
+
+		// 3. env section SCION_HUB_ENDPOINT takes final priority
+		if scionCfg.Env != nil {
+			if ep, ok := scionCfg.Env["SCION_HUB_ENDPOINT"]; ok && ep != "" {
+				extraEnv["SCION_HUB_ENDPOINT"] = ep
+				extraEnv["SCION_HUB_URL"] = ep
+			}
+		}
+
+		env, _ := buildAgentEnv(scionCfg, extraEnv)
+
+		envMap := make(map[string]string)
+		for _, e := range env {
+			parts := strings.SplitN(e, "=", 2)
+			if len(parts) == 2 {
+				envMap[parts[0]] = parts[1]
+			}
+		}
+
+		// The env section value should be the final winner
+		if got := envMap["SCION_HUB_ENDPOINT"]; got != "http://host.docker.internal:8080" {
+			t.Errorf("SCION_HUB_ENDPOINT = %q, want %q (env section should win)", got, "http://host.docker.internal:8080")
+		}
+		if got := envMap["SCION_HUB_URL"]; got != "http://host.docker.internal:8080" {
+			t.Errorf("SCION_HUB_URL = %q, want %q (env section should win)", got, "http://host.docker.internal:8080")
+		}
+	})
+
+	t.Run("no env section key preserves hub.endpoint", func(t *testing.T) {
+		scionCfg := &api.ScionConfig{
+			Hub: &api.AgentHubConfig{
+				Endpoint: "https://hub-endpoint.example.com",
+			},
+			Env: map[string]string{
+				"OTHER_VAR": "value",
+			},
+		}
+
+		extraEnv := map[string]string{
+			"SCION_HUB_ENDPOINT": "http://localhost:8080",
+			"SCION_HUB_URL":     "http://localhost:8080",
+		}
+
+		// hub.endpoint overrides
+		if scionCfg.Hub != nil && scionCfg.Hub.Endpoint != "" {
+			extraEnv["SCION_HUB_ENDPOINT"] = scionCfg.Hub.Endpoint
+			extraEnv["SCION_HUB_URL"] = scionCfg.Hub.Endpoint
+		}
+
+		// No SCION_HUB_ENDPOINT in env section — should not change
+		if scionCfg.Env != nil {
+			if ep, ok := scionCfg.Env["SCION_HUB_ENDPOINT"]; ok && ep != "" {
+				extraEnv["SCION_HUB_ENDPOINT"] = ep
+				extraEnv["SCION_HUB_URL"] = ep
+			}
+		}
+
+		env, _ := buildAgentEnv(scionCfg, extraEnv)
+
+		envMap := make(map[string]string)
+		for _, e := range env {
+			parts := strings.SplitN(e, "=", 2)
+			if len(parts) == 2 {
+				envMap[parts[0]] = parts[1]
+			}
+		}
+
+		if got := envMap["SCION_HUB_ENDPOINT"]; got != "https://hub-endpoint.example.com" {
+			t.Errorf("SCION_HUB_ENDPOINT = %q, want %q (hub.endpoint should win when no env key)", got, "https://hub-endpoint.example.com")
+		}
+	})
+}
+
+func TestStartScionConfigEnvHubEndpointOverridesAll(t *testing.T) {
+	// Integration test verifying the full priority chain:
+	// grove settings -> hub.endpoint -> env.SCION_HUB_ENDPOINT
+	// The env-key value should be the final one in the container env.
+	tmpDir := t.TempDir()
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	originalHome := os.Getenv("HOME")
+	defer os.Setenv("HOME", originalHome)
+	os.Setenv("HOME", tmpDir)
+
+	// Clear dev token env vars so we control the test
+	for _, k := range []string{"SCION_DEV_TOKEN", "SCION_SERVER_AUTH_DEV_TOKEN", "SCION_DEV_TOKEN_FILE"} {
+		if old, ok := os.LookupEnv(k); ok {
+			defer os.Setenv(k, old)
+			os.Unsetenv(k)
+		}
+	}
+
+	globalScionDir := filepath.Join(tmpDir, ".scion")
+
+	// Create harness-config
+	hcDir := filepath.Join(globalScionDir, "harness-configs", "test-harness")
+	os.MkdirAll(hcDir, 0755)
+	os.WriteFile(filepath.Join(hcDir, "config.yaml"), []byte("harness: gemini\nuser: scion\nimage: test-image:latest\n"), 0644)
+
+	// Create a minimal template
+	tplDir := filepath.Join(globalScionDir, "templates", "default")
+	os.MkdirAll(tplDir, 0755)
+	os.WriteFile(filepath.Join(tplDir, "scion-agent.json"), []byte(`{"default_harness_config": "test-harness"}`), 0644)
+
+	// Global settings
+	os.WriteFile(filepath.Join(globalScionDir, "settings.yaml"), []byte(`schema_version: "1"
+active_profile: local
+profiles:
+  local:
+    runtime: docker
+`), 0644)
+
+	// Create project grove with hub-enabled settings (priority 1)
+	projectDir := filepath.Join(tmpDir, "project")
+	projectScionDir := filepath.Join(projectDir, ".scion")
+	os.MkdirAll(projectScionDir, 0755)
+	os.WriteFile(filepath.Join(projectScionDir, "settings.yaml"), []byte(`hub:
+  enabled: true
+  endpoint: "http://grove-settings:9810"
+`), 0644)
+
+	// Create agent with both hub.endpoint (priority 2) and
+	// env.SCION_HUB_ENDPOINT (priority 3 — should win)
+	agentDir := filepath.Join(projectScionDir, "agents", "hub-env-test")
+	os.MkdirAll(filepath.Join(agentDir, "home"), 0755)
+	os.WriteFile(filepath.Join(agentDir, "scion-agent.json"), []byte(`{
+		"harness": "gemini",
+		"hub": {
+			"endpoint": "http://hub-endpoint-field:9810"
+		},
+		"env": {
+			"SCION_HUB_ENDPOINT": "http://host.docker.internal:8080"
+		}
+	}`), 0644)
+
+	// Capture the RunConfig
+	var capturedConfig runtime.RunConfig
+	mockRT := &runtime.MockRuntime{
+		ListFunc: func(ctx context.Context, labelFilter map[string]string) ([]api.AgentInfo, error) {
+			return []api.AgentInfo{}, nil
+		},
+		RunFunc: func(ctx context.Context, cfg runtime.RunConfig) (string, error) {
+			capturedConfig = cfg
+			return "mock-id", nil
+		},
+	}
+
+	mgr := NewManager(mockRT)
+
+	_, err := mgr.Start(context.Background(), api.StartOptions{
+		Name:      "hub-env-test",
+		GrovePath: projectScionDir,
+		NoAuth:    true,
+	})
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	// Convert env slice to map
+	envMap := make(map[string]string)
+	for _, e := range capturedConfig.Env {
+		parts := strings.SplitN(e, "=", 2)
+		if len(parts) == 2 {
+			envMap[parts[0]] = parts[1]
+		}
+	}
+
+	// The env section value (priority 3) should be the final winner,
+	// overriding both grove settings (priority 1) and hub.endpoint (priority 2)
+	if got := envMap["SCION_HUB_ENDPOINT"]; got != "http://host.docker.internal:8080" {
+		t.Errorf("SCION_HUB_ENDPOINT = %q, want %q (env section should override all)", got, "http://host.docker.internal:8080")
+	}
+	if got := envMap["SCION_HUB_URL"]; got != "http://host.docker.internal:8080" {
+		t.Errorf("SCION_HUB_URL = %q, want %q (env section should override all)", got, "http://host.docker.internal:8080")
+	}
+}
