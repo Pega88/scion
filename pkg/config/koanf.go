@@ -143,6 +143,27 @@ func LoadSettingsKoanf(grovePath string) (*Settings, error) {
 	return settings, nil
 }
 
+// LoadSettingsFromDir loads settings from a single directory's settings file
+// without applying embedded defaults, global settings, or environment variables.
+// This is useful when you need to read just one grove's settings file in isolation,
+// for example to get the grove's hub.endpoint without the broker's own env vars
+// overriding it.
+func LoadSettingsFromDir(dir string) (*Settings, error) {
+	k := koanf.New(".")
+	if err := loadSettingsFile(k, dir); err != nil {
+		return nil, err
+	}
+	settings := &Settings{
+		Runtimes:  make(map[string]RuntimeConfig),
+		Harnesses: make(map[string]HarnessConfig),
+		Profiles:  make(map[string]ProfileConfig),
+	}
+	if err := k.Unmarshal("", settings); err != nil {
+		return nil, err
+	}
+	return settings, nil
+}
+
 // loadSettingsFile loads settings from a directory, preferring YAML over JSON
 func loadSettingsFile(k *koanf.Koanf, dir string) error {
 	yamlPath := filepath.Join(dir, "settings.yaml")

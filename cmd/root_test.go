@@ -209,6 +209,10 @@ hub:
 				os.Unsetenv("SCION_DEV_TOKEN")
 			}
 			os.Unsetenv("SCION_DEV_TOKEN_FILE")
+			// Clear v1 settings env var to prevent it from leaking dev auth
+			origServerAuthToken := os.Getenv("SCION_SERVER_AUTH_DEV_TOKEN")
+			os.Unsetenv("SCION_SERVER_AUTH_DEV_TOKEN")
+			defer os.Setenv("SCION_SERVER_AUTH_DEV_TOKEN", origServerAuthToken)
 
 			// Write dev token file if specified
 			devTokenPath := filepath.Join(scionDir, "dev-token")

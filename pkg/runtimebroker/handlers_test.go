@@ -435,6 +435,9 @@ func TestCreateAgentWithResolvedEnv(t *testing.T) {
 
 // TestCreateAgentWithoutHubCredentials tests agent creation without Hub integration.
 func TestCreateAgentWithoutHubCredentials(t *testing.T) {
+	// Clear dev token env var to prevent broker from forwarding it to agents
+	t.Setenv("SCION_SERVER_AUTH_DEV_TOKEN", "")
+
 	srv, mgr := newTestServerWithEnvCapture()
 
 	body := `{"name": "local-agent"}`

@@ -22,6 +22,13 @@ import (
 )
 
 func TestGetAuthInfo_NoAuth(t *testing.T) {
+	// Clear all dev token sources so getAuthInfo doesn't find dev auth
+	t.Setenv("SCION_DEV_TOKEN", "")
+	t.Setenv("SCION_SERVER_AUTH_DEV_TOKEN", "")
+	t.Setenv("SCION_DEV_TOKEN_FILE", "")
+	t.Setenv("SCION_HUB_TOKEN", "")
+	t.Setenv("HOME", t.TempDir())
+
 	settings := &config.Settings{}
 	info := getAuthInfo(settings, "https://hub.example.com")
 	assert.Equal(t, "none", info.MethodType)
@@ -62,6 +69,13 @@ func TestGetAuthInfo_EnvTokenTakesPriority(t *testing.T) {
 }
 
 func TestGetAuthInfo_NilHub(t *testing.T) {
+	// Clear all dev token sources so getAuthInfo doesn't find dev auth
+	t.Setenv("SCION_DEV_TOKEN", "")
+	t.Setenv("SCION_SERVER_AUTH_DEV_TOKEN", "")
+	t.Setenv("SCION_DEV_TOKEN_FILE", "")
+	t.Setenv("SCION_HUB_TOKEN", "")
+	t.Setenv("HOME", t.TempDir())
+
 	settings := &config.Settings{
 		Hub: nil,
 	}

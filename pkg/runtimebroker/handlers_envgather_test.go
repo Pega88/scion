@@ -38,6 +38,34 @@ func newTestServerWithGrovePath(t *testing.T, settingsYAML string) (*Server, *en
 		t.Fatal(err)
 	}
 
+	// Create template directories so FindTemplateInGrovePath can resolve them.
+	// Each template needs a scion-agent.yaml that sets harness_config so that
+	// provisioning doesn't fall back to the embedded default (gemini).
+	for _, tpl := range []string{"claude", "gemini", "default"} {
+		tplDir := filepath.Join(groveDir, "templates", tpl)
+		if err := os.MkdirAll(tplDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		cfg := "harness_config: " + tpl + "\n"
+		if err := os.WriteFile(filepath.Join(tplDir, "scion-agent.yaml"), []byte(cfg), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Create harness-config directories so FindHarnessConfigDir can resolve them.
+	// The on-disk directory name is "harness-configs" (with hyphen).
+	// Each needs a config.yaml with harness and image fields.
+	for _, hc := range []string{"claude", "gemini"} {
+		hcDir := filepath.Join(groveDir, "harness-configs", hc)
+		if err := os.MkdirAll(hcDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		cfg := "harness: " + hc + "\nimage: test-image:" + hc + "\n"
+		if err := os.WriteFile(filepath.Join(hcDir, "config.yaml"), []byte(cfg), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	cfg := DefaultServerConfig()
 	cfg.BrokerID = "test-broker-id"
 	cfg.BrokerName = "test-host"
@@ -61,7 +89,7 @@ harness_configs:
       API_KEY: ""
 profiles:
   default:
-    runtime: docker
+    runtime: mock
 `
 	srv, mgr, groveDir := newTestServerWithGrovePath(t, settings)
 
@@ -105,7 +133,7 @@ harness_configs:
       SECRET_TOKEN: ""
 profiles:
   default:
-    runtime: docker
+    runtime: mock
 `
 	srv, _, groveDir := newTestServerWithGrovePath(t, settings)
 
@@ -173,7 +201,7 @@ harness_configs:
       BROKER_LOCAL_KEY: ""
 profiles:
   default:
-    runtime: docker
+    runtime: mock
 `
 	srv, mgr, groveDir := newTestServerWithGrovePath(t, settings)
 
@@ -219,7 +247,7 @@ harness_configs:
       NEEDED_KEY: ""
 profiles:
   default:
-    runtime: docker
+    runtime: mock
 `
 	srv, mgr, groveDir := newTestServerWithGrovePath(t, settings)
 
@@ -306,7 +334,7 @@ func TestEnvGather_HarnessAware(t *testing.T) {
 schema_version: "1"
 profiles:
   default:
-    runtime: docker
+    runtime: mock
 `)
 
 	body := `{
@@ -355,7 +383,7 @@ func TestEnvGather_GeminiAuthType(t *testing.T) {
 schema_version: "1"
 profiles:
   default:
-    runtime: docker
+    runtime: mock
 `)
 
 	body := `{
@@ -402,7 +430,7 @@ func TestEnvGather_SettingsAuthTypeOverride(t *testing.T) {
 schema_version: "1"
 profiles:
   default:
-    runtime: docker
+    runtime: mock
     harness_overrides:
       gemini:
         auth_selected_type: oauth-personal
@@ -442,7 +470,7 @@ harness_configs:
       MISSING_KEY: ""
 profiles:
   default:
-    runtime: docker
+    runtime: mock
 `
 	srv, mgr, groveDir := newTestServerWithGrovePath(t, settings)
 
@@ -484,7 +512,7 @@ harness_configs:
       API_KEY: ""
 profiles:
   default:
-    runtime: docker
+    runtime: mock
 `
 	srv, _, groveDir := newTestServerWithGrovePath(t, settings)
 
@@ -528,7 +556,7 @@ harness_configs:
       OTHER_TOKEN: ""
 profiles:
   default:
-    runtime: docker
+    runtime: mock
 `
 	srv, _, groveDir := newTestServerWithGrovePath(t, settings)
 
@@ -603,7 +631,7 @@ harness_configs:
         description: "Token for third-party API integration"
 profiles:
   default:
-    runtime: docker
+    runtime: mock
 `
 	srv, _, groveDir := newTestServerWithGrovePath(t, settings)
 
@@ -668,7 +696,7 @@ harness_configs:
     harness: claude
 profiles:
   default:
-    runtime: docker
+    runtime: mock
     secrets:
       - key: PROFILE_SECRET
         description: "Secret required by this profile"
@@ -723,7 +751,7 @@ harness_configs:
     harness: claude
 profiles:
   default:
-    runtime: docker
+    runtime: mock
 `
 	srv, _, groveDir := newTestServerWithGrovePath(t, settings)
 
@@ -798,7 +826,7 @@ harness_configs:
         description: "This key is missing"
 profiles:
   default:
-    runtime: docker
+    runtime: mock
 `
 	srv, _, groveDir := newTestServerWithGrovePath(t, settings)
 
@@ -858,7 +886,7 @@ harness_configs:
         type: file
 profiles:
   default:
-    runtime: docker
+    runtime: mock
     secrets:
       - key: PROFILE_TOKEN
         description: "Profile token"
@@ -937,7 +965,7 @@ harness_configs:
     harness: claude
 profiles:
   default:
-    runtime: docker
+    runtime: mock
 `
 	srv, _, groveDir := newTestServerWithGrovePath(t, settings)
 
@@ -1005,7 +1033,7 @@ harness_configs:
         description: "From harness config"
 profiles:
   default:
-    runtime: docker
+    runtime: mock
     secrets:
       - key: SHARED_KEY
         description: "From profile"

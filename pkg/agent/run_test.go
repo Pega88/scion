@@ -931,8 +931,8 @@ func TestStartInjectsHubEnvFromGroveSettings(t *testing.T) {
 	defer os.Setenv("HOME", originalHome)
 	os.Setenv("HOME", tmpDir)
 
-	// Clear dev token env vars so we control the test
-	for _, k := range []string{"SCION_DEV_TOKEN", "SCION_SERVER_AUTH_DEV_TOKEN", "SCION_DEV_TOKEN_FILE"} {
+	// Clear env vars that would interfere with settings loading
+	for _, k := range []string{"SCION_DEV_TOKEN", "SCION_SERVER_AUTH_DEV_TOKEN", "SCION_DEV_TOKEN_FILE", "SCION_HUB_ENDPOINT", "SCION_HUB_URL"} {
 		if old, ok := os.LookupEnv(k); ok {
 			defer os.Setenv(k, old)
 			os.Unsetenv(k)

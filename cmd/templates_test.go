@@ -195,6 +195,11 @@ func TestRunTemplateDelete_HubOnly_AutoConfirm(t *testing.T) {
 
 	tmpHome := t.TempDir()
 	os.Setenv("HOME", tmpHome)
+	// Clear SCION_HUB_ENDPOINT to prevent it overriding the mock server URL
+	// in settings loaded via koanf env provider
+	origHubEndpoint := os.Getenv("SCION_HUB_ENDPOINT")
+	os.Unsetenv("SCION_HUB_ENDPOINT")
+	defer os.Setenv("SCION_HUB_ENDPOINT", origHubEndpoint)
 	globalMode = true
 	autoConfirm = true
 	noHub = false
@@ -229,6 +234,10 @@ func TestRunTemplateDelete_Both_AutoConfirm(t *testing.T) {
 
 	tmpHome := t.TempDir()
 	os.Setenv("HOME", tmpHome)
+	// Clear SCION_HUB_ENDPOINT to prevent it overriding the mock server URL
+	origHubEndpoint2 := os.Getenv("SCION_HUB_ENDPOINT")
+	os.Unsetenv("SCION_HUB_ENDPOINT")
+	defer os.Setenv("SCION_HUB_ENDPOINT", origHubEndpoint2)
 	globalMode = true
 	autoConfirm = true
 	noHub = false

@@ -288,6 +288,12 @@ func TestLoadSettingsKoanfV1GroveID(t *testing.T) {
 	defer os.Setenv("HOME", originalHome)
 	os.Setenv("HOME", tmpDir)
 
+	// Unset SCION_HUB_ENDPOINT so it doesn't override the file-loaded value
+	if orig, ok := os.LookupEnv("SCION_HUB_ENDPOINT"); ok {
+		os.Unsetenv("SCION_HUB_ENDPOINT")
+		t.Cleanup(func() { os.Setenv("SCION_HUB_ENDPOINT", orig) })
+	}
+
 	groveDir := filepath.Join(tmpDir, "my-grove")
 	groveScionDir := filepath.Join(groveDir, ".scion")
 	if err := os.MkdirAll(groveScionDir, 0755); err != nil {

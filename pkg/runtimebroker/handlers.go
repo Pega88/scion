@@ -272,8 +272,10 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 	// the externally-accessible Hub URL (e.g. a tunnel/DNS endpoint) that agents
 	// inside containers need to reach the Hub. This takes precedence because the
 	// Hub's own server config may only know its localhost address.
+	// Use LoadSettingsFromDir to read only the grove's settings file without
+	// picking up the broker's environment variables or global settings.
 	if req.GrovePath != "" {
-		if groveSettings, err := config.LoadSettings(req.GrovePath); err == nil {
+		if groveSettings, err := config.LoadSettingsFromDir(req.GrovePath); err == nil {
 			if !groveSettings.IsHubExplicitlyDisabled() {
 				if ep := groveSettings.GetHubEndpoint(); ep != "" {
 					hubEndpoint = ep

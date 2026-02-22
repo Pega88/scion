@@ -537,6 +537,12 @@ func TestUpdateHubSettingsGlobal(t *testing.T) {
 	defer os.Setenv("HOME", originalHome)
 	os.Setenv("HOME", tmpDir)
 
+	// Unset SCION_HUB_ENDPOINT so it doesn't override file-loaded values
+	if orig, ok := os.LookupEnv("SCION_HUB_ENDPOINT"); ok {
+		os.Unsetenv("SCION_HUB_ENDPOINT")
+		t.Cleanup(func() { os.Setenv("SCION_HUB_ENDPOINT", orig) })
+	}
+
 	// Create global .scion directory
 	globalScionDir := filepath.Join(tmpDir, ".scion")
 	if err := os.MkdirAll(globalScionDir, 0755); err != nil {
@@ -597,6 +603,12 @@ func TestHubSettingsLoadFromGlobal(t *testing.T) {
 	originalHome := os.Getenv("HOME")
 	defer os.Setenv("HOME", originalHome)
 	os.Setenv("HOME", tmpDir)
+
+	// Unset SCION_HUB_ENDPOINT so it doesn't override file-loaded values
+	if orig, ok := os.LookupEnv("SCION_HUB_ENDPOINT"); ok {
+		os.Unsetenv("SCION_HUB_ENDPOINT")
+		t.Cleanup(func() { os.Setenv("SCION_HUB_ENDPOINT", orig) })
+	}
 
 	// Create global settings with hub config
 	globalScionDir := filepath.Join(tmpDir, ".scion")
