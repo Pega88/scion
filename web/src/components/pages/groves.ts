@@ -249,15 +249,21 @@ export class ScionPageGroves extends LitElement {
 
   private onGrovesUpdated(): void {
     const updatedGroves = stateManager.getGroves();
-    if (updatedGroves.length > 0) {
-      // Merge SSE updates into our local groves list.
-      // The state manager maintains a map keyed by ID; merge into local array.
-      const groveMap = new Map(this.groves.map((g) => [g.id, g]));
-      for (const grove of updatedGroves) {
-        groveMap.set(grove.id, { ...groveMap.get(grove.id), ...grove } as Grove);
-      }
-      this.groves = Array.from(groveMap.values());
+    const deletedIds = stateManager.getDeletedGroveIds();
+
+    const groveMap = new Map(this.groves.map((g) => [g.id, g]));
+
+    // Remove deleted groves
+    for (const id of deletedIds) {
+      groveMap.delete(id);
     }
+
+    // Merge updated/created groves
+    for (const grove of updatedGroves) {
+      groveMap.set(grove.id, { ...groveMap.get(grove.id), ...grove } as Grove);
+    }
+
+    this.groves = Array.from(groveMap.values());
   }
 
   private async loadGroves(): Promise<void> {

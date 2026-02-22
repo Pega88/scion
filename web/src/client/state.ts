@@ -39,6 +39,7 @@ export type ViewScope =
 export interface AppState {
   agents: Map<string, Agent>;
   groves: Map<string, Grove>;
+  deletedGroveIds: Set<string>;
   connected: boolean;
   scope: ViewScope | null;
 }
@@ -55,6 +56,7 @@ export class StateManager extends EventTarget {
   private state: AppState = {
     agents: new Map(),
     groves: new Map(),
+    deletedGroveIds: new Set(),
     connected: false,
     scope: null,
   };
@@ -114,6 +116,7 @@ export class StateManager extends EventTarget {
     // Clear state from previous scope
     this.state.agents.clear();
     this.state.groves.clear();
+    this.state.deletedGroveIds.clear();
 
     const subjects = this.subjectsForScope(scope);
     if (subjects.length > 0) {
@@ -130,8 +133,8 @@ export class StateManager extends EventTarget {
   private subjectsForScope(scope: ViewScope): string[] {
     switch (scope.type) {
       case 'dashboard':
-        // Aggregate stats per grove (lightweight)
-        return ['grove.*.summary'];
+        // All grove-scoped events: lifecycle (created/updated/deleted) and agent changes
+        return ['grove.>'];
 
       case 'grove':
         // Grove-level wildcard: all lightweight/medium events for agents in this grove
@@ -212,18 +215,23 @@ export class StateManager extends EventTarget {
   }
 
   private handleGroveEvent(groveId: string, eventType: string, data: unknown): void {
-    if (eventType === 'summary') {
+    if (eventType === 'deleted') {
+      this.state.groves.delete(groveId);
+      this.state.deletedGroveIds.add(groveId);
+    } else if (eventType === 'summary') {
       // Dashboard summary event: grove.*.summary
       const summaryData = data as Partial<Grove> & { groveId?: string };
       const id = summaryData.groveId || groveId;
       const existing = this.state.groves.get(id) || ({} as Grove);
       const updated = { ...existing, ...summaryData, id };
       this.state.groves.set(id, updated as Grove);
-    } else if (eventType === 'updated') {
-      // Grove metadata change: grove.{groveId}.updated
-      const existing = this.state.groves.get(groveId) || ({} as Grove);
-      const updated = { ...existing, ...(data as Partial<Grove>), id: groveId };
-      this.state.groves.set(groveId, updated as Grove);
+    } else {
+      // Grove lifecycle events: created, updated
+      const groveData = data as Partial<Grove> & { groveId?: string };
+      const id = groveData.groveId || groveId;
+      const existing = this.state.groves.get(id) || ({} as Grove);
+      const updated = { ...existing, ...groveData, id };
+      this.state.groves.set(id, updated as Grove);
     }
     this.notify('groves-updated');
   }
@@ -256,6 +264,10 @@ export class StateManager extends EventTarget {
 
   getGrove(id: string): Grove | undefined {
     return this.state.groves.get(id);
+  }
+
+  getDeletedGroveIds(): Set<string> {
+    return this.state.deletedGroveIds;
   }
 
   get isConnected(): boolean {
