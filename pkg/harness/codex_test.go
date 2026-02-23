@@ -17,7 +17,6 @@ package harness
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/ptone/scion-agent/pkg/api"
@@ -131,7 +130,7 @@ func TestCodexRequiredEnvKeys(t *testing.T) {
 	}
 }
 
-func TestCodexInjectSystemPrompt(t *testing.T) {
+func TestCodexInjectSystemPrompt_NoOp(t *testing.T) {
 	agentHome := t.TempDir()
 	c := &Codex{}
 
@@ -141,50 +140,20 @@ func TestCodexInjectSystemPrompt(t *testing.T) {
 		t.Fatalf("InjectAgentInstructions failed: %v", err)
 	}
 
-	// Now inject system prompt (should prepend)
+	// System prompt injection should be a no-op (not yet supported)
 	sysContent := []byte("You are a helpful assistant.")
 	if err := c.InjectSystemPrompt(agentHome, sysContent); err != nil {
 		t.Fatalf("InjectSystemPrompt failed: %v", err)
 	}
 
+	// AGENTS.md should remain unchanged — no system prompt prepended
 	target := filepath.Join(agentHome, ".codex", "AGENTS.md")
 	data, err := os.ReadFile(target)
 	if err != nil {
 		t.Fatalf("expected file at %s: %v", target, err)
 	}
 
-	content := string(data)
-	if !strings.Contains(content, "# System Prompt") {
-		t.Error("expected system prompt header in merged content")
-	}
-	if !strings.Contains(content, "You are a helpful assistant.") {
-		t.Error("expected system prompt content in merged file")
-	}
-	if !strings.Contains(content, "# Existing Instructions") {
-		t.Error("expected original agent instructions to be preserved")
-	}
-}
-
-func TestCodexInjectSystemPrompt_NoExistingInstructions(t *testing.T) {
-	agentHome := t.TempDir()
-	c := &Codex{}
-
-	sysContent := []byte("You are a helpful assistant.")
-	if err := c.InjectSystemPrompt(agentHome, sysContent); err != nil {
-		t.Fatalf("InjectSystemPrompt failed: %v", err)
-	}
-
-	target := filepath.Join(agentHome, ".codex", "AGENTS.md")
-	data, err := os.ReadFile(target)
-	if err != nil {
-		t.Fatalf("expected file at %s: %v", target, err)
-	}
-
-	content := string(data)
-	if !strings.Contains(content, "# System Prompt") {
-		t.Error("expected system prompt header")
-	}
-	if !strings.Contains(content, "You are a helpful assistant.") {
-		t.Error("expected system prompt content")
+	if string(data) != string(agentContent) {
+		t.Errorf("AGENTS.md was modified by InjectSystemPrompt; got %q, want %q", string(data), string(agentContent))
 	}
 }

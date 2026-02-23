@@ -135,22 +135,7 @@ func (c *Codex) RequiredEnvKeys(authSelectedType string) []string {
 }
 
 func (c *Codex) InjectSystemPrompt(agentHome string, content []byte) error {
-	// Codex has no native system prompt support — downgrade by prepending to AGENTS.md
-	dir := filepath.Join(agentHome, ".codex")
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("failed to create .codex directory: %w", err)
-	}
-	agentsPath := filepath.Join(dir, "AGENTS.md")
-	header := fmt.Sprintf("# System Prompt\n\n%s\n\n---\n\n", string(content))
-
-	existing, err := os.ReadFile(agentsPath)
-	if err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("failed to read existing agent instructions: %w", err)
-	}
-
-	merged := []byte(header)
-	if len(existing) > 0 {
-		merged = append(merged, existing...)
-	}
-	return os.WriteFile(agentsPath, merged, 0644)
+	// TODO: Codex has no native system prompt support. System prompt injection is
+	// not yet implemented for this harness.
+	return nil
 }
