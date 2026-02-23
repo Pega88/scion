@@ -62,8 +62,12 @@ export type GroveStatus = 'active' | 'inactive' | 'error';
 export interface Grove {
   id: string;
   name: string;
+  slug?: string;
   path: string;
+  gitRemote?: string;
   status: GroveStatus;
+  visibility?: string;
+  labels?: Record<string, string>;
   agentCount: number;
   createdAt: string;
   updatedAt: string;

@@ -278,6 +278,15 @@ export class ScionPageHome extends LitElement {
             <p>Spin up a new AI agent</p>
           </div>
         </a>
+        <a href="/groves/new" class="action-card">
+          <div class="action-icon">
+            <sl-icon name="folder-plus"></sl-icon>
+          </div>
+          <div class="action-text">
+            <h4>Create Grove</h4>
+            <p>Add a project workspace</p>
+          </div>
+        </a>
         <a href="/groves" class="action-card">
           <div class="action-icon">
             <sl-icon name="folder"></sl-icon>

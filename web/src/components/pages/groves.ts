@@ -319,10 +319,12 @@ export class ScionPageGroves extends LitElement {
     return html`
       <div class="header">
         <h1>Groves</h1>
-        <sl-button variant="primary" size="small" disabled>
-          <sl-icon slot="prefix" name="plus-lg"></sl-icon>
-          New Grove
-        </sl-button>
+        <a href="/groves/new" style="text-decoration: none;">
+          <sl-button variant="primary" size="small">
+            <sl-icon slot="prefix" name="plus-lg"></sl-icon>
+            New Grove
+          </sl-button>
+        </a>
       </div>
 
       ${this.loading ? this.renderLoading() : this.error ? this.renderError() : this.renderGroves()}
@@ -373,10 +375,12 @@ export class ScionPageGroves extends LitElement {
           started, or run
           <code>scion init</code> in a project directory.
         </p>
-        <sl-button variant="primary" disabled>
-          <sl-icon slot="prefix" name="plus-lg"></sl-icon>
-          Create Grove
-        </sl-button>
+        <a href="/groves/new" style="text-decoration: none;">
+          <sl-button variant="primary">
+            <sl-icon slot="prefix" name="plus-lg"></sl-icon>
+            Create Grove
+          </sl-button>
+        </a>
       </div>
     `;
   }
@@ -390,7 +394,7 @@ export class ScionPageGroves extends LitElement {
               <sl-icon name="folder-fill"></sl-icon>
               ${grove.name}
             </h3>
-            <div class="grove-path">${grove.path}</div>
+            <div class="grove-path">${grove.gitRemote || grove.path}</div>
           </div>
           <scion-status-badge
             status=${this.getStatusVariant(grove.status)}

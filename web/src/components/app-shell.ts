@@ -220,6 +220,9 @@ export class ScionApp extends LitElement {
     }
 
     // Check for pattern matches
+    if (this.currentPath === '/groves/new') {
+      return 'Create Grove';
+    }
     if (this.currentPath.startsWith('/groves/')) {
       return 'Grove Details';
     }
