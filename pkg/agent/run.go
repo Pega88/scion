@@ -521,6 +521,14 @@ func buildAgentEnv(scionCfg *api.ScionConfig, extraEnv map[string]string) ([]str
 			if expandedValue == "" && warned {
 				continue
 			}
+			// If the value is empty (no variable reference was used),
+			// treat the key as an implicit host env passthrough: look up
+			// the environment variable of the same name on the host.
+			if expandedValue == "" {
+				if hostVal, ok := os.LookupEnv(expandedKey); ok && hostVal != "" {
+					expandedValue = hostVal
+				}
+			}
 			combined[expandedKey] = expandedValue
 		}
 	}

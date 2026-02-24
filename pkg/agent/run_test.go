@@ -195,6 +195,46 @@ func TestBuildAgentEnv(t *testing.T) {
 	}
 }
 
+func TestBuildAgentEnv_EmptyValuePassthrough(t *testing.T) {
+	// When a config env entry has an empty value (no ${VAR} reference),
+	// buildAgentEnv should implicitly look up the host env var of the same name.
+	os.Setenv("HOST_AVAILABLE_KEY", "host-value")
+	defer os.Unsetenv("HOST_AVAILABLE_KEY")
+
+	scionCfg := &api.ScionConfig{
+		Env: map[string]string{
+			"HOST_AVAILABLE_KEY": "",  // empty → should pick up "host-value" from host
+			"HOST_MISSING_KEY":   "",  // empty → host doesn't have it → should be omitted
+			"EXPLICIT_VALUE":     "explicit",
+		},
+	}
+
+	env, warnings := buildAgentEnv(scionCfg, nil)
+
+	envMap := make(map[string]string)
+	for _, e := range env {
+		parts := strings.SplitN(e, "=", 2)
+		if len(parts) == 2 {
+			envMap[parts[0]] = parts[1]
+		}
+	}
+
+	if envMap["HOST_AVAILABLE_KEY"] != "host-value" {
+		t.Errorf("expected HOST_AVAILABLE_KEY = %q, got %q", "host-value", envMap["HOST_AVAILABLE_KEY"])
+	}
+	if envMap["EXPLICIT_VALUE"] != "explicit" {
+		t.Errorf("expected EXPLICIT_VALUE = %q, got %q", "explicit", envMap["EXPLICIT_VALUE"])
+	}
+	if _, ok := envMap["HOST_MISSING_KEY"]; ok {
+		t.Error("expected HOST_MISSING_KEY to be omitted, but it was present")
+	}
+
+	// Only HOST_MISSING_KEY should produce a warning
+	if len(warnings) != 1 {
+		t.Errorf("expected 1 warning, got %d: %v", len(warnings), warnings)
+	}
+}
+
 func TestBuildAgentEnv_ScionExtraPath(t *testing.T) {
 	// SCION_EXTRA_PATH should pass through buildAgentEnv as a normal literal
 	// env var (no special expansion needed since the value is a literal
