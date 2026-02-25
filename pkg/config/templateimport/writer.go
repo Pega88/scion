@@ -77,7 +77,7 @@ func getInstructionFilePath(harnessName, templateDir string) string {
 	homeDir := filepath.Join(templateDir, "home")
 	switch harnessName {
 	case "claude":
-		return filepath.Join(homeDir, ".claude", "claude.md")
+		return filepath.Join(homeDir, ".claude", "CLAUDE.md")
 	case "gemini":
 		return filepath.Join(homeDir, ".gemini", "gemini.md")
 	default:

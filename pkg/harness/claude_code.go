@@ -166,9 +166,23 @@ func (c *ClaudeCode) GetHarnessEmbedsFS() (embed.FS, string) {
 }
 
 func (c *ClaudeCode) InjectAgentInstructions(agentHome string, content []byte) error {
-	target := filepath.Join(agentHome, ".claude", "CLAUDE.md")
-	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+	dir := filepath.Join(agentHome, ".claude")
+	target := filepath.Join(dir, "CLAUDE.md")
+	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("failed to create directory for agent instructions: %w", err)
+	}
+	// Remove any existing instruction file with non-canonical casing (e.g.,
+	// "claude.md" copied from a harness-config home directory). On case-
+	// sensitive filesystems these would coexist with "CLAUDE.md" and cause
+	// confusion; on case-insensitive filesystems we still want the directory
+	// entry to use the canonical uppercase name.
+	entries, err := os.ReadDir(dir)
+	if err == nil {
+		for _, e := range entries {
+			if !e.IsDir() && strings.EqualFold(e.Name(), "CLAUDE.md") && e.Name() != "CLAUDE.md" {
+				_ = os.Remove(filepath.Join(dir, e.Name()))
+			}
+		}
 	}
 	return os.WriteFile(target, content, 0644)
 }

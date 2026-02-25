@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/ptone/scion-agent/pkg/api"
@@ -162,6 +163,49 @@ func TestClaudeInjectAgentInstructions(t *testing.T) {
 	}
 	if string(data) != string(content) {
 		t.Errorf("content mismatch: got %q, want %q", string(data), string(content))
+	}
+}
+
+func TestClaudeInjectAgentInstructions_RemovesLowercaseFile(t *testing.T) {
+	agentHome := t.TempDir()
+	c := &ClaudeCode{}
+
+	// Simulate a harness-config home that provides claude.md (lowercase)
+	claudeDir := filepath.Join(agentHome, ".claude")
+	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	lowercasePath := filepath.Join(claudeDir, "claude.md")
+	if err := os.WriteFile(lowercasePath, []byte("# Harness config instructions"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Inject agent instructions — should remove the lowercase file
+	content := []byte("# Template Instructions\nFrom agents.md")
+	if err := c.InjectAgentInstructions(agentHome, content); err != nil {
+		t.Fatalf("InjectAgentInstructions failed: %v", err)
+	}
+
+	// Canonical CLAUDE.md should exist with the injected content
+	target := filepath.Join(claudeDir, "CLAUDE.md")
+	data, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("expected CLAUDE.md at %s: %v", target, err)
+	}
+	if string(data) != string(content) {
+		t.Errorf("content mismatch: got %q, want %q", string(data), string(content))
+	}
+
+	// Lowercase claude.md should no longer exist (on case-sensitive filesystems)
+	if _, err := os.Lstat(lowercasePath); err == nil {
+		// File still exists — check if this is a case-insensitive FS
+		// by comparing the name from directory listing
+		entries, _ := os.ReadDir(claudeDir)
+		for _, e := range entries {
+			if strings.EqualFold(e.Name(), "CLAUDE.md") && e.Name() != "CLAUDE.md" {
+				t.Errorf("lowercase %q should have been removed", e.Name())
+			}
+		}
 	}
 }
 

@@ -441,7 +441,7 @@ func TestWriteTemplate_Claude(t *testing.T) {
 	assert.Equal(t, "sonnet", cfg.Model)
 
 	// Check instruction file
-	instructionPath := filepath.Join(path, "home", ".claude", "claude.md")
+	instructionPath := filepath.Join(path, "home", ".claude", "CLAUDE.md")
 	assert.FileExists(t, instructionPath)
 	content, err := os.ReadFile(instructionPath)
 	require.NoError(t, err)
