@@ -3506,37 +3506,10 @@ func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-
-	var user store.User
-	if err := readJSON(r, &user); err != nil {
-		BadRequest(w, "Invalid request body: "+err.Error())
-		return
-	}
-
-	if user.Email == "" {
-		ValidationError(w, "email is required", nil)
-		return
-	}
-	if user.DisplayName == "" {
-		ValidationError(w, "displayName is required", nil)
-		return
-	}
-
-	user.ID = api.NewUUID()
-	if user.Role == "" {
-		user.Role = store.UserRoleMember
-	}
-	if user.Status == "" {
-		user.Status = "active"
-	}
-
-	if err := s.store.CreateUser(ctx, &user); err != nil {
-		writeErrorFromErr(w, err, "")
-		return
-	}
-
-	writeJSON(w, http.StatusCreated, user)
+	// User creation is managed by the hub's internal sign-in flows (OAuth).
+	// Direct API creation is not permitted.
+	writeError(w, http.StatusForbidden, ErrCodeForbidden,
+		"user creation is managed through sign-in flows and cannot be performed via the API", nil)
 }
 
 func (s *Server) handleUserByID(w http.ResponseWriter, r *http.Request) {

@@ -72,6 +72,7 @@ const (
 	sessKeyUserEmail       = "email"
 	sessKeyUserName        = "name"
 	sessKeyUserAvatar      = "avatar"
+	sessKeyUserRole        = "role"
 	sessKeyReturnTo        = "returnTo"
 	sessKeyOAuthState      = "oauthState"
 	sessKeyHubAccessToken  = "hubAccessToken"
@@ -88,6 +89,7 @@ type webSessionUser struct {
 	Email     string `json:"email"`
 	Name      string `json:"displayName"`
 	AvatarURL string `json:"avatarUrl,omitempty"`
+	Role      string `json:"role,omitempty"`
 }
 
 // getWebSessionUser retrieves the web session user from the request context.
@@ -788,6 +790,7 @@ func (ws *WebServer) devAuthMiddleware(next http.Handler) http.Handler {
 				Email:     sessionString(session, sessKeyUserEmail),
 				Name:      sessionString(session, sessKeyUserName),
 				AvatarURL: sessionString(session, sessKeyUserAvatar),
+				Role:      sessionString(session, sessKeyUserRole),
 			}
 			ctx := context.WithValue(r.Context(), webUserContextKey{}, user)
 			next.ServeHTTP(w, r.WithContext(ctx))
@@ -800,12 +803,14 @@ func (ws *WebServer) devAuthMiddleware(next http.Handler) http.Handler {
 			Email:     "dev@localhost",
 			Name:      "Development User",
 			AvatarURL: "",
+			Role:      "admin",
 		}
 
 		session.Values[sessKeyUserID] = devUser.UserID
 		session.Values[sessKeyUserEmail] = devUser.Email
 		session.Values[sessKeyUserName] = devUser.Name
 		session.Values[sessKeyUserAvatar] = devUser.AvatarURL
+		session.Values[sessKeyUserRole] = devUser.Role
 
 		// Generate Hub JWTs so the session-to-bearer middleware can
 		// authenticate API requests, mirroring handleOAuthCallback.
@@ -859,6 +864,7 @@ func (ws *WebServer) sessionAuthMiddleware(next http.Handler) http.Handler {
 				Email:     sessionString(session, sessKeyUserEmail),
 				Name:      sessionString(session, sessKeyUserName),
 				AvatarURL: sessionString(session, sessKeyUserAvatar),
+				Role:      sessionString(session, sessKeyUserRole),
 			}
 			ctx := context.WithValue(r.Context(), webUserContextKey{}, user)
 			next.ServeHTTP(w, r.WithContext(ctx))
@@ -1081,6 +1087,7 @@ func (ws *WebServer) handleOAuthCallback(w http.ResponseWriter, r *http.Request)
 	session.Values[sessKeyUserEmail] = user.Email
 	session.Values[sessKeyUserName] = user.DisplayName
 	session.Values[sessKeyUserAvatar] = user.AvatarURL
+	session.Values[sessKeyUserRole] = user.Role
 
 	// Get returnTo and clear it
 	returnTo, _ := session.Values[sessKeyReturnTo].(string)
@@ -1157,6 +1164,7 @@ func (ws *WebServer) handleAuthMe(w http.ResponseWriter, r *http.Request) {
 		Email:     sessionString(session, sessKeyUserEmail),
 		Name:      sessionString(session, sessKeyUserName),
 		AvatarURL: sessionString(session, sessKeyUserAvatar),
+		Role:      sessionString(session, sessKeyUserRole),
 	}
 
 	w.Header().Set("Content-Type", "application/json")
