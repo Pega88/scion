@@ -64,7 +64,7 @@ schema_version: "1"
 hub:
   endpoint: "https://hub.demo.scion-ai.dev"
 telemetry:
-  enabled: true
+  enabled: false
   cloud:
     enabled: true
     endpoint: "cloudtrace.googleapis.com:443"
