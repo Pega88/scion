@@ -27,7 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestGatherAndSubmitEnv_NonInteractiveRejectsNeededKeys(t *testing.T) {
+func TestGatherAndSubmitEnv_NonInteractiveGathersFromLocalEnv(t *testing.T) {
 	// Save and restore package-level state
 	origNonInteractive := nonInteractive
 	origAutoConfirm := autoConfirm
@@ -41,10 +41,24 @@ func TestGatherAndSubmitEnv_NonInteractiveRejectsNeededKeys(t *testing.T) {
 	nonInteractive = true
 	autoConfirm = true // --non-interactive implies --yes
 
-	// Even though the key is available in the local env, non-interactive
-	// mode should refuse to gather and send it.
+	// When the key is available in the local env, non-interactive mode
+	// should gather and submit it automatically (same as --yes).
 	os.Setenv("TEST_SECRET_KEY", "secret-value")
 	defer os.Unsetenv("TEST_SECRET_KEY")
+
+	// Set up mock Hub server
+	groveID := "grove-1"
+	server, captured := newEnvGatherMockHubServer(t, groveID)
+	defer server.Close()
+
+	client, err := hubclient.New(server.URL)
+	require.NoError(t, err)
+
+	hubCtx := &HubContext{
+		Client:   client,
+		Endpoint: server.URL,
+		GroveID:  groveID,
+	}
 
 	resp := &hubclient.CreateAgentResponse{
 		Agent: &hubclient.Agent{ID: "agent-1"},
@@ -55,10 +69,12 @@ func TestGatherAndSubmitEnv_NonInteractiveRejectsNeededKeys(t *testing.T) {
 		},
 	}
 
-	_, err := gatherAndSubmitEnv(context.Background(), nil, "grove-1", resp)
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "non-interactive mode")
-	assert.Contains(t, err.Error(), "TEST_SECRET_KEY")
+	result, err := gatherAndSubmitEnv(context.Background(), hubCtx, groveID, resp)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+
+	// Verify the key was submitted to the Hub
+	assert.Equal(t, "secret-value", (*captured)["TEST_SECRET_KEY"])
 }
 
 func TestGatherAndSubmitEnv_NonInteractiveAllowsWhenAllSatisfied(t *testing.T) {
@@ -91,7 +107,7 @@ func TestGatherAndSubmitEnv_NonInteractiveAllowsWhenAllSatisfied(t *testing.T) {
 	assert.Equal(t, resp, result)
 }
 
-func TestGatherAndSubmitEnv_NonInteractiveMultipleKeys(t *testing.T) {
+func TestGatherAndSubmitEnv_NonInteractiveMultipleKeysMissing(t *testing.T) {
 	// Save and restore package-level state
 	origNonInteractive := nonInteractive
 	origAutoConfirm := autoConfirm
@@ -106,6 +122,10 @@ func TestGatherAndSubmitEnv_NonInteractiveMultipleKeys(t *testing.T) {
 	autoConfirm = true
 	outputFormat = "json" // Suppress stderr output for cleaner test
 
+	// Keys are not in the local environment, so they can't be satisfied
+	os.Unsetenv("KEY_A")
+	os.Unsetenv("KEY_B")
+
 	resp := &hubclient.CreateAgentResponse{
 		Agent: &hubclient.Agent{ID: "agent-3"},
 		EnvGather: &hubclient.EnvGatherResponse{
@@ -117,7 +137,7 @@ func TestGatherAndSubmitEnv_NonInteractiveMultipleKeys(t *testing.T) {
 
 	_, err := gatherAndSubmitEnv(context.Background(), nil, "grove-1", resp)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "non-interactive mode")
+	assert.Contains(t, err.Error(), "cannot satisfy required environment variables")
 	assert.Contains(t, err.Error(), "KEY_A")
 	assert.Contains(t, err.Error(), "KEY_B")
 }
@@ -293,7 +313,7 @@ func TestGatherAndSubmitEnv_MixedSecretAndEnvKeys(t *testing.T) {
 	assert.Contains(t, err.Error(), "ENV_ONLY")
 }
 
-func TestGatherAndSubmitEnv_NonInteractiveSecretGuidance(t *testing.T) {
+func TestGatherAndSubmitEnv_NonInteractiveSecretsMissing(t *testing.T) {
 	// Save and restore package-level state
 	origNonInteractive := nonInteractive
 	origAutoConfirm := autoConfirm
@@ -306,7 +326,12 @@ func TestGatherAndSubmitEnv_NonInteractiveSecretGuidance(t *testing.T) {
 
 	nonInteractive = true
 	autoConfirm = true
-	outputFormat = "" // show stderr so we can verify messages
+	outputFormat = "json" // suppress stderr
+
+	// Neither key is in local env; SECRET_A is secret-eligible but can't be
+	// prompted in non-interactive mode, ENV_B is env-only.
+	os.Unsetenv("SECRET_A")
+	os.Unsetenv("ENV_B")
 
 	resp := &hubclient.CreateAgentResponse{
 		Agent: &hubclient.Agent{ID: "agent-1"},
@@ -325,7 +350,7 @@ func TestGatherAndSubmitEnv_NonInteractiveSecretGuidance(t *testing.T) {
 
 	_, err := gatherAndSubmitEnv(context.Background(), nil, "grove-1", resp)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "non-interactive mode")
+	assert.Contains(t, err.Error(), "cannot satisfy required environment variables")
 }
 
 func TestGatherAndSubmitEnv_InteractiveSecretEmptyInput(t *testing.T) {

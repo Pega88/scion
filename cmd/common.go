@@ -905,31 +905,6 @@ func gatherAndSubmitEnv(ctx context.Context, hubCtx *HubContext, groveID string,
 		}
 	}
 
-	// In non-interactive mode, refuse to gather env vars from the local
-	// environment because sending potentially sensitive values without
-	// explicit user confirmation should be avoided.
-	if nonInteractive && len(gather.Needs) > 0 {
-		if !isJSONOutput() {
-			fmt.Fprintln(os.Stderr)
-			for _, key := range gather.Needs {
-				fmt.Fprintf(os.Stderr, "  %s — required but cannot be sent without user confirmation\n", key)
-			}
-			fmt.Fprintf(os.Stderr, "\nIn non-interactive mode, environment variables cannot be forwarded from the local environment.\n")
-			fmt.Fprintf(os.Stderr, "Make them available via the Hub or broker configuration:\n")
-			for _, key := range gather.Needs {
-				if gather.SecretInfo != nil {
-					if _, ok := gather.SecretInfo[key]; ok {
-						fmt.Fprintf(os.Stderr, "  scion hub secret set %s <value>\n", key)
-						continue
-					}
-				}
-				fmt.Fprintf(os.Stderr, "  scion hub env set %s <value>\n", key)
-			}
-			fmt.Fprintln(os.Stderr)
-		}
-		return nil, fmt.Errorf("non-interactive mode: cannot gather and send environment variables %v without user confirmation; set them on the Hub or broker instead", gather.Needs)
-	}
-
 	// Try to satisfy needed keys from local environment
 	gatheredEnv := make(map[string]string)
 	var missingKeys []string
