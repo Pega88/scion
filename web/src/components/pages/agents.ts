@@ -24,7 +24,8 @@ import { LitElement, html, css, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 
 import type { PageData, Agent, Capabilities } from '../../shared/types.js';
-import { can, isTerminalAvailable } from '../../shared/types.js';
+import { can, isTerminalAvailable, getAgentDisplayStatus, isAgentRunning } from '../../shared/types.js';
+import type { StatusType } from '../shared/status-badge.js';
 import { apiFetch } from '../../client/api.js';
 import { stateManager } from '../../client/state.js';
 import '../shared/status-badge.js';
@@ -317,22 +318,6 @@ export class ScionPageAgents extends LitElement {
     }
   }
 
-  private getStatusVariant(status: string): 'success' | 'warning' | 'danger' | 'neutral' {
-    switch (status) {
-      case 'running':
-        return 'success';
-      case 'stopped':
-        return 'neutral';
-      case 'provisioning':
-      case 'cloning':
-        return 'warning';
-      case 'error':
-        return 'danger';
-      default:
-        return 'neutral';
-    }
-  }
-
   private async handleAgentAction(
     agentId: string,
     action: 'start' | 'stop' | 'delete'
@@ -475,8 +460,8 @@ export class ScionPageAgents extends LitElement {
             </div>
           </div>
           <scion-status-badge
-            status=${this.getStatusVariant(agent.status)}
-            label=${agent.status}
+            status=${getAgentDisplayStatus(agent) as StatusType}
+            label=${getAgentDisplayStatus(agent)}
             size="small"
           >
           </scion-status-badge>
@@ -490,13 +475,13 @@ export class ScionPageAgents extends LitElement {
               variant="primary"
               size="small"
               href="/agents/${agent.id}/terminal"
-              ?disabled=${!isTerminalAvailable(agent.status)}
+              ?disabled=${!isTerminalAvailable(agent)}
             >
               <sl-icon slot="prefix" name="terminal"></sl-icon>
               Terminal
             </sl-button>
           ` : nothing}
-          ${agent.status === 'running'
+          ${isAgentRunning(agent)
             ? can(agent._capabilities, 'stop') ? html`
                 <sl-button
                   variant="danger"

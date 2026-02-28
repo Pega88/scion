@@ -24,7 +24,8 @@ import { LitElement, html, css, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 
 import type { PageData, Grove, Agent, Capabilities } from '../../shared/types.js';
-import { can, canAny } from '../../shared/types.js';
+import { can, canAny, getAgentDisplayStatus, isAgentRunning, isTerminalAvailable } from '../../shared/types.js';
+import type { StatusType } from '../shared/status-badge.js';
 import { apiFetch } from '../../client/api.js';
 import { stateManager } from '../../client/state.js';
 import '../shared/status-badge.js';
@@ -597,17 +598,12 @@ export class ScionPageGroveDetail extends LitElement {
     }
   }
 
-  private getStatusVariant(status: string): 'success' | 'warning' | 'danger' | 'neutral' {
+  private getGroveStatusVariant(status: string): 'success' | 'warning' | 'danger' | 'neutral' {
     switch (status) {
       case 'active':
-      case 'running':
         return 'success';
       case 'inactive':
-      case 'stopped':
         return 'neutral';
-      case 'provisioning':
-      case 'cloning':
-        return 'warning';
       case 'error':
         return 'danger';
       default:
@@ -831,7 +827,7 @@ export class ScionPageGroveDetail extends LitElement {
               : html`<sl-icon name="folder-fill"></sl-icon>`}
             <h1>${this.grove.name}</h1>
             <scion-status-badge
-              status=${this.getStatusVariant(this.grove.status)}
+              status=${this.getGroveStatusVariant(this.grove.status)}
               label=${this.grove.status}
               size="small"
             ></scion-status-badge>
@@ -870,7 +866,7 @@ export class ScionPageGroveDetail extends LitElement {
         <div class="stat">
           <span class="stat-label">Running</span>
           <span class="stat-value"
-            >${this.agents.filter((a) => a.status === 'running').length}</span
+            >${this.agents.filter((a) => isAgentRunning(a)).length}</span
           >
         </div>
         <div class="stat">
@@ -1111,8 +1107,8 @@ export class ScionPageGroveDetail extends LitElement {
             </div>
           </div>
           <scion-status-badge
-            status=${this.getStatusVariant(agent.status)}
-            label=${agent.status}
+            status=${getAgentDisplayStatus(agent) as StatusType}
+            label=${getAgentDisplayStatus(agent)}
             size="small"
           ></scion-status-badge>
         </div>
@@ -1126,14 +1122,14 @@ export class ScionPageGroveDetail extends LitElement {
                   variant="primary"
                   size="small"
                   href="/agents/${agent.id}/terminal"
-                  ?disabled=${agent.status !== 'running'}
+                  ?disabled=${!isTerminalAvailable(agent)}
                 >
                   <sl-icon slot="prefix" name="terminal"></sl-icon>
                   Terminal
                 </sl-button>
               `
             : nothing}
-          ${agent.status === 'running'
+          ${isAgentRunning(agent)
             ? can(agent._capabilities, 'stop')
               ? html`
                   <sl-button

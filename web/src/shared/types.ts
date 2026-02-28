@@ -133,7 +133,7 @@ export interface Grove {
 }
 
 /**
- * Agent status enumeration
+ * Agent status enumeration (legacy flat status)
  */
 export type AgentStatus =
   | 'running'
@@ -146,6 +146,41 @@ export type AgentStatus =
   | 'waiting_for_input'
   | 'completed';
 
+/**
+ * Agent lifecycle phase (from canonical agent state model)
+ */
+export type AgentPhase =
+  | 'created'
+  | 'provisioning'
+  | 'cloning'
+  | 'starting'
+  | 'running'
+  | 'stopping'
+  | 'stopped'
+  | 'error';
+
+/**
+ * Agent runtime activity (only meaningful when phase=running)
+ */
+export type AgentActivity =
+  | 'idle'
+  | 'thinking'
+  | 'executing'
+  | 'waiting_for_input'
+  | 'completed'
+  | 'limits_exceeded'
+  | 'stalled'
+  | 'offline';
+
+/**
+ * Contextual metadata for the current agent state
+ */
+export interface AgentDetail {
+  toolName?: string;
+  message?: string;
+  taskSummary?: string;
+}
+
 /** Statuses where the agent container has not yet started or has terminated. */
 const TERMINAL_UNAVAILABLE_STATUSES: ReadonlySet<AgentStatus> = new Set([
   'provisioning',
@@ -156,11 +191,35 @@ const TERMINAL_UNAVAILABLE_STATUSES: ReadonlySet<AgentStatus> = new Set([
 
 /**
  * Whether an agent's terminal is accessible.
- * The terminal is available whenever the container is running — i.e. any
- * status *except* pre-start (provisioning/cloning) or terminated (stopped/completed).
+ * Uses phase when available; falls back to legacy status.
  */
-export function isTerminalAvailable(status: AgentStatus): boolean {
-  return !TERMINAL_UNAVAILABLE_STATUSES.has(status);
+export function isTerminalAvailable(agent: Agent): boolean {
+  const phase = agent.phase;
+  if (phase) {
+    return phase === 'running' || phase === 'stopping';
+  }
+  return !TERMINAL_UNAVAILABLE_STATUSES.has(agent.status);
+}
+
+/**
+ * Returns the display status string for an agent.
+ * When the agent is running, shows the activity (e.g. 'thinking');
+ * otherwise shows the lifecycle phase. Falls back to legacy status.
+ */
+export function getAgentDisplayStatus(agent: Agent): string {
+  if (agent.phase === 'running' && agent.activity) {
+    return agent.activity;
+  }
+  return agent.phase || agent.status;
+}
+
+/**
+ * Whether the agent is in a running lifecycle phase.
+ * Falls back to legacy status when phase is not present.
+ */
+export function isAgentRunning(agent: Agent): boolean {
+  if (agent.phase) return agent.phase === 'running';
+  return !['provisioning', 'cloning', 'stopped', 'error', 'created'].includes(agent.status);
 }
 
 /**
@@ -173,6 +232,9 @@ export interface Agent {
   grove?: string;
   template: string;
   status: AgentStatus;
+  phase?: AgentPhase;
+  activity?: AgentActivity;
+  detail?: AgentDetail;
   taskSummary?: string;
   message?: string;
   lastSeen?: string;

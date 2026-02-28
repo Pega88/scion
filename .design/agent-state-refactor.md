@@ -547,13 +547,13 @@ This replaces the previously discussed but unimplemented "stale/stalled detectio
 4. ~~Update `pkg/agent/list.go` to propagate Phase/Activity from agent-info.json~~
 5. ~~Remove duplicate `AgentStatus*` constants from runtimebroker~~
 
-### Phase 5: Refactor Web Frontend
+### Phase 5: Refactor Web Frontend ✅
 
-1. Update `web/src/shared/types.ts` with `AgentPhase`, `AgentActivity`, `AgentDetail`
-2. Update state manager to handle structured state deltas
-3. Update status badge to render phase + activity
-4. Update terminal availability check
-5. Update agent detail page, agent list, dashboard
+1. ~~Update `web/src/shared/types.ts` with `AgentPhase`, `AgentActivity`, `AgentDetail`~~
+2. ~~Update state manager to handle structured state deltas (not needed — delta merge already spreads all fields)~~
+3. ~~Update status badge to render phase + activity~~
+4. ~~Update terminal availability check~~
+5. ~~Update agent detail page, agent list, grove detail, broker detail, terminal, agent-create~~
 
 ### Phase 6: Cleanup and Documentation
 

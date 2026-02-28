@@ -25,6 +25,8 @@ import { LitElement, html, css } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 
 import type { PageData, RuntimeBroker, Agent } from '../../shared/types.js';
+import { getAgentDisplayStatus } from '../../shared/types.js';
+import type { StatusType } from '../shared/status-badge.js';
 import { apiFetch } from '../../client/api.js';
 import { stateManager } from '../../client/state.js';
 import '../shared/status-badge.js';
@@ -503,15 +505,13 @@ export class ScionPageBrokerDetail extends LitElement {
     }
   }
 
-  private getStatusVariant(status: string): 'success' | 'warning' | 'danger' | 'neutral' {
+  private getBrokerStatusVariant(status: string): 'success' | 'warning' | 'danger' | 'neutral' {
     switch (status) {
       case 'online':
-      case 'running':
         return 'success';
       case 'degraded':
         return 'warning';
       case 'offline':
-      case 'stopped':
         return 'neutral';
       case 'error':
         return 'danger';
@@ -594,7 +594,7 @@ export class ScionPageBrokerDetail extends LitElement {
             <sl-icon name="hdd-rack"></sl-icon>
             <h1>${this.broker.name}</h1>
             <scion-status-badge
-              status=${this.getStatusVariant(this.broker.status)}
+              status=${this.getBrokerStatusVariant(this.broker.status)}
               label=${this.broker.status}
               size="small"
             ></scion-status-badge>
@@ -740,8 +740,8 @@ export class ScionPageBrokerDetail extends LitElement {
             </div>
           </div>
           <scion-status-badge
-            status=${this.getStatusVariant(agent.status)}
-            label=${agent.status}
+            status=${getAgentDisplayStatus(agent) as StatusType}
+            label=${getAgentDisplayStatus(agent)}
             size="small"
           ></scion-status-badge>
         </div>

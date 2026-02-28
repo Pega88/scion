@@ -43,7 +43,18 @@ export type StatusType =
   | 'warning'
   | 'danger'
   | 'info'
-  | 'neutral';
+  | 'neutral'
+  // Agent lifecycle phase
+  | 'created'
+  // Agent activity states
+  | 'idle'
+  | 'thinking'
+  | 'executing'
+  | 'waiting_for_input'
+  | 'completed'
+  | 'limits_exceeded'
+  | 'stalled'
+  | 'offline';
 
 /**
  * Status configuration with variant and icon
@@ -72,6 +83,19 @@ const STATUS_MAP: Record<StatusType, StatusConfig> = {
   pending: { variant: 'warning', icon: 'clock', pulse: true },
   active: { variant: 'success', icon: 'circle-fill', pulse: false },
   inactive: { variant: 'neutral', icon: 'circle', pulse: false },
+
+  // Agent lifecycle phase
+  created: { variant: 'neutral', icon: 'circle', pulse: false },
+
+  // Agent activity states
+  idle: { variant: 'success', icon: 'circle-fill', pulse: false },
+  thinking: { variant: 'primary', icon: 'lightning-charge', pulse: true },
+  executing: { variant: 'primary', icon: 'gear', pulse: true },
+  waiting_for_input: { variant: 'warning', icon: 'chat-dots', pulse: false },
+  completed: { variant: 'success', icon: 'check-circle', pulse: false },
+  limits_exceeded: { variant: 'danger', icon: 'exclamation-octagon', pulse: false },
+  stalled: { variant: 'warning', icon: 'hourglass-bottom', pulse: false },
+  offline: { variant: 'neutral', icon: 'wifi-off', pulse: false },
 
   // Semantic statuses
   success: { variant: 'success', pulse: false },

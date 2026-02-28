@@ -24,7 +24,8 @@ import { LitElement, html, css, nothing } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 
 import type { PageData, Agent, Grove } from '../../shared/types.js';
-import { can, isTerminalAvailable } from '../../shared/types.js';
+import { can, isTerminalAvailable, getAgentDisplayStatus, isAgentRunning } from '../../shared/types.js';
+import type { StatusType } from '../shared/status-badge.js';
 import { apiFetch } from '../../client/api.js';
 import { stateManager } from '../../client/state.js';
 import '../shared/status-badge.js';
@@ -485,22 +486,6 @@ export class ScionPageAgentDetail extends LitElement {
     }
   }
 
-  private getStatusVariant(status: string): 'success' | 'warning' | 'danger' | 'neutral' {
-    switch (status) {
-      case 'running':
-        return 'success';
-      case 'stopped':
-        return 'neutral';
-      case 'provisioning':
-      case 'cloning':
-        return 'warning';
-      case 'error':
-        return 'danger';
-      default:
-        return 'neutral';
-    }
-  }
-
   private formatDate(dateString: string): string {
     try {
       const date = new Date(dateString);
@@ -617,8 +602,8 @@ export class ScionPageAgentDetail extends LitElement {
             <sl-icon name="cpu"></sl-icon>
             <h1>${this.agent.name}</h1>
             <scion-status-badge
-              status=${this.getStatusVariant(this.agent.status)}
-              label=${this.agent.status}
+              status=${getAgentDisplayStatus(this.agent) as StatusType}
+              label=${getAgentDisplayStatus(this.agent)}
             ></scion-status-badge>
           </div>
           <div class="header-meta">
@@ -637,7 +622,7 @@ export class ScionPageAgentDetail extends LitElement {
           </div>
         </div>
         <div class="header-actions">
-          ${this.agent.status === 'running'
+          ${isAgentRunning(this.agent)
             ? can(this.agent._capabilities, 'stop') ? html`
                 <sl-button
                   variant="danger"
@@ -678,13 +663,13 @@ export class ScionPageAgentDetail extends LitElement {
         </div>
       </div>
 
-      ${this.agent.status === 'error' && this.agent.message
+      ${(this.agent.phase === 'error' || (!this.agent.phase && this.agent.status === 'error')) && (this.agent.detail?.message || this.agent.message)
         ? html`
             <div class="agent-error-banner">
               <sl-icon name="exclamation-octagon"></sl-icon>
               <div class="error-content">
                 <div class="error-title">Agent Error</div>
-                <div class="error-message">${this.agent.message}</div>
+                <div class="error-message">${this.agent.detail?.message || this.agent.message}</div>
               </div>
             </div>
           `
@@ -696,7 +681,7 @@ export class ScionPageAgentDetail extends LitElement {
           <a
             class="quick-action"
             href="/agents/${this.agentId}/terminal"
-            ?disabled=${!isTerminalAvailable(this.agent.status)}
+            ?disabled=${!isTerminalAvailable(this.agent)}
           >
             <sl-icon name="terminal"></sl-icon>
             <span>Open Terminal</span>
@@ -730,7 +715,7 @@ export class ScionPageAgentDetail extends LitElement {
           </div>
           <div class="info-item">
             <span class="info-label">Status</span>
-            <span class="info-value">${this.agent.status || 'Unknown'}</span>
+            <span class="info-value">${getAgentDisplayStatus(this.agent) || 'Unknown'}</span>
           </div>
           <div class="info-item">
             <span class="info-label">Created</span>
@@ -746,14 +731,14 @@ export class ScionPageAgentDetail extends LitElement {
           </div>
         </div>
 
-        ${this.agent.taskSummary
+        ${this.agent.detail?.taskSummary || this.agent.taskSummary
           ? html`
               <h4
                 style="margin-top: 1.5rem; margin-bottom: 0.5rem; font-size: 0.875rem; font-weight: 600;"
               >
                 Current Task
               </h4>
-              <div class="task-summary">${this.agent.taskSummary}</div>
+              <div class="task-summary">${this.agent.detail?.taskSummary || this.agent.taskSummary}</div>
             `
           : ''}
       </div>
@@ -763,10 +748,10 @@ export class ScionPageAgentDetail extends LitElement {
         <h3 class="card-title">Status</h3>
         <div class="status-timeline">
           <div class="timeline-item">
-            <div class="timeline-dot ${this.agent.status === 'running' ? 'active' : ''}"></div>
+            <div class="timeline-dot ${isAgentRunning(this.agent) ? 'active' : ''}"></div>
             <div class="timeline-content">
               <div class="timeline-title">
-                ${this.agent.status.charAt(0).toUpperCase() + this.agent.status.slice(1)}
+                ${(() => { const s = getAgentDisplayStatus(this.agent); return s.charAt(0).toUpperCase() + s.slice(1); })()}
               </div>
               <div class="timeline-time">
                 Last updated:
