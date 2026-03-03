@@ -27,7 +27,6 @@ import type { PageData, Grove, Capabilities } from '../../shared/types.js';
 import { can } from '../../shared/types.js';
 import { apiFetch } from '../../client/api.js';
 import { stateManager } from '../../client/state.js';
-import '../shared/status-badge.js';
 
 @customElement('scion-page-groves')
 export class ScionPageGroves extends LitElement {
@@ -320,19 +319,6 @@ export class ScionPageGroves extends LitElement {
     }
   }
 
-  private getStatusVariant(status: string): 'success' | 'warning' | 'danger' | 'neutral' {
-    switch (status) {
-      case 'active':
-        return 'success';
-      case 'inactive':
-        return 'neutral';
-      case 'error':
-        return 'danger';
-      default:
-        return 'neutral';
-    }
-  }
-
   private formatDate(dateString: string): string {
     try {
       const date = new Date(dateString);
@@ -431,12 +417,6 @@ export class ScionPageGroves extends LitElement {
             </h3>
             <div class="grove-path">${grove.gitRemote || grove.path || 'Hub workspace'}</div>
           </div>
-          <scion-status-badge
-            status=${this.getStatusVariant(grove.status)}
-            label=${grove.status}
-            size="small"
-          >
-          </scion-status-badge>
         </div>
         <div class="grove-stats">
           <div class="stat">
