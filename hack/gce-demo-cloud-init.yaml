@@ -31,6 +31,9 @@ packages:
   - python3-certbot-dns-google
 
 runcmd:
+  # Install kubectl
+  - apt-get update
+  - apt-get install -y kubectl || snap install kubectl --classic
   # Install modern Git
   - add-apt-repository -y ppa:git-core/ppa
   - apt-get update

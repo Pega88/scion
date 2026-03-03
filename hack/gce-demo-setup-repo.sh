@@ -20,8 +20,8 @@ set -euo pipefail
 # Configuration
 REPO="ptone/scion-agent"
 INSTANCE_NAME="scion-demo"
-ZONE="us-central1-a"
-PROJECT_ID=$(gcloud config get-value project 2>/dev/null)
+ZONE=${ZONE:-"us-central1-a"}
+PROJECT_ID=${PROJECT_ID:-$(gcloud config get-value project 2>/dev/null)}
 
 if [[ -z "$PROJECT_ID" ]]; then
     echo "Error: PROJECT_ID is not set and could not be determined from gcloud config."

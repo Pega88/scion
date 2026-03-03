@@ -20,8 +20,8 @@ set -euo pipefail
 INSTANCE_NAME="scion-demo"
 SERVICE_ACCOUNT_NAME="scion-demo-sa"
 FIREWALL_RULE="scion-demo-allow-http-https"
-REGION="us-central1"
-ZONE="us-central1-a"
+REGION=${REGION:-"us-central1"}
+ZONE=${ZONE:-"us-central1-a"}
 PROJECT_ID=$(gcloud config get-value project 2>/dev/null)
 CLOUD_INIT_FILE="hack/gce-demo-cloud-init.yaml"
 
@@ -54,6 +54,11 @@ function delete_resources() {
         gcloud compute firewall-rules delete "${FIREWALL_RULE}" --quiet
     else
         echo "Firewall rule ${FIREWALL_RULE} not found."
+    fi
+
+    # Optional Cluster deletion
+    if [[ -f "hack/gce-demo-cluster.sh" ]]; then
+        ./hack/gce-demo-cluster.sh delete
     fi
     
     echo "=== Deletion Complete ==="
@@ -91,6 +96,16 @@ case $SIZE_CHOICE in
 esac
 
 echo "Selected Machine Type: ${MACHINE_TYPE}"
+
+# Prompt for cluster
+if [[ -z "${CREATE_CLUSTER:-}" ]]; then
+    read -p "Create GKE cluster for agents? [y/N]: " CLUSTER_CHOICE
+    if [[ "${CLUSTER_CHOICE,,}" == "y" ]]; then
+        CREATE_CLUSTER="true"
+    else
+        CREATE_CLUSTER="false"
+    fi
+fi
 
 # Create Service Account if it doesn't exist
 if ! gcloud iam service-accounts describe "${SERVICE_ACCOUNT_EMAIL}" &>/dev/null; then
@@ -137,6 +152,9 @@ gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
 gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
     --member "serviceAccount:${SERVICE_ACCOUNT_EMAIL}" \
     --role "roles/secretmanager.admin" > /dev/null
+gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+    --member "serviceAccount:${SERVICE_ACCOUNT_EMAIL}" \
+    --role "roles/container.admin" > /dev/null
 
 # Create Firewall Rule if it doesn't exist
 if ! gcloud compute firewall-rules describe "${FIREWALL_RULE}" &>/dev/null; then
@@ -164,6 +182,11 @@ gcloud compute instances create "${INSTANCE_NAME}" \
     --labels=env=demo,project=scion,type=scion-demo \
     --create-disk=auto-delete=yes,boot=yes,device-name=scion-demo,image=projects/ubuntu-os-cloud/global/images/family/ubuntu-2204-lts,mode=rw,size=200,type=projects/${PROJECT_ID}/zones/${ZONE}/diskTypes/pd-balanced \
     --metadata-from-file=user-data="${CLOUD_INIT_FILE}"
+
+# Cluster creation
+if [[ "${CREATE_CLUSTER:-}" == "true" ]]; then
+    ./hack/gce-demo-cluster.sh
+fi
 
 echo ""
 echo "=== Success ==="

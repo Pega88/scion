@@ -24,8 +24,8 @@
 set -euo pipefail
 
 INSTANCE_NAME="scion-demo"
-ZONE="us-central1-a"
-PROJECT_ID="deploy-demo-test"
+ZONE=${ZONE:-"us-central1-a"}
+PROJECT_ID=${PROJECT_ID:-"deploy-demo-test"}
 DOMAIN="hub.demo.scion-ai.dev"
 REPO_DIR="/home/scion/scion-agent"
 SCION_BIN="/usr/local/bin/scion"
@@ -130,6 +130,7 @@ if $FULL_DEPLOY; then
     # settings.yaml
     cat <<'SETTINGS_EOF' > "$UPLOAD_DIR/scion-settings.yaml"
 schema_version: "1"
+default_runtime: kubernetes
 hub:
   endpoint: "https://hub.demo.scion-ai.dev"
 telemetry:
@@ -272,6 +273,12 @@ if $FULL_DEPLOY; then
     else
         echo "  -> Caddyfile unchanged"
     fi
+
+    # Install kubectl if missing
+    if ! command -v kubectl &>/dev/null; then
+        echo "  -> Installing kubectl..."
+        sudo apt-get update && sudo apt-get install -y kubectl || sudo snap install kubectl --classic || echo "  -> Failed to install kubectl automatically"
+    fi
 '
 fi
 
@@ -307,6 +314,10 @@ gcloud compute ssh "${INSTANCE_NAME}" --zone="${ZONE}" --command '
     echo "  -> Binary build took $(( SECONDS - BUILD_START ))s"
 
     # Stop existing service
+    echo ""
+    echo "==> Configuring GKE credentials..."
+    sudo -u scion sh -c "gcloud container clusters get-credentials scion-demo-cluster --region us-central1 --project deploy-demo-test || true"
+
     echo ""
     echo "==> Stopping service..."
     if systemctl is-active --quiet scion-hub; then
