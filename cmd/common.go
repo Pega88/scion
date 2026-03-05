@@ -815,7 +815,7 @@ func createAgentWithBrokerResolution(ctx context.Context, hubCtx *HubContext, gr
 				if resp.EnvGather != nil {
 					util.Debugf("[env-gather] createAgentWithBrokerResolution: Hub returned 202 with env-gather requirements")
 					util.Debugf("[env-gather]   required: %v", resp.EnvGather.Required)
-					util.Debugf("[env-gather]   hubHas: %d keys, brokerHas: %d keys", len(resp.EnvGather.HubHas), len(resp.EnvGather.BrokerHas))
+					util.Debugf("[env-gather]   hubHas: %d keys", len(resp.EnvGather.HubHas))
 					util.Debugf("[env-gather]   needs: %v", resp.EnvGather.Needs)
 				} else {
 					util.Debugf("[env-gather] createAgentWithBrokerResolution: Hub returned success — all env satisfied (no gather needed)")
@@ -932,15 +932,6 @@ func gatherAndSubmitEnv(ctx context.Context, hubCtx *HubContext, groveID string,
 			statusf("  %s — provided by Hub (%s)\n", src.Key, src.Scope)
 		}
 	}
-	if len(gather.BrokerHas) > 0 {
-		if len(gather.HubHas) == 0 {
-			statusln("\nEnvironment variables already provided:")
-		}
-		for _, key := range gather.BrokerHas {
-			statusf("  %s — provided by Broker\n", key)
-		}
-	}
-
 	// Try to satisfy needed keys from local environment
 	gatheredEnv := make(map[string]string)
 	var missingKeys []string

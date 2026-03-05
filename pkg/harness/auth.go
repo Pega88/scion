@@ -29,22 +29,28 @@ import (
 // It is source-agnostic: it checks env vars and well-known file paths
 // without knowing which harness will consume the result.
 func GatherAuth() api.AuthConfig {
-	return GatherAuthWithEnv(nil)
+	return GatherAuthWithEnv(nil, true)
 }
 
 // GatherAuthWithEnv is like GatherAuth but checks the provided env overlay
 // before falling back to os.Getenv for each key. This allows hub-resolved
 // or CLI-gathered env vars (passed via opts.Env) to be visible during auth
 // resolution, even when the broker process itself lacks those env vars.
-func GatherAuthWithEnv(env map[string]string) api.AuthConfig {
+//
+// When localSources is false (broker mode), the lookup function only checks
+// the env map and never falls back to os.Getenv(), and filesystem scanning
+// for well-known credential files is skipped entirely. This prevents broker
+// operator credentials from leaking into hub-dispatched agents.
+func GatherAuthWithEnv(env map[string]string, localSources bool) api.AuthConfig {
 	lookup := func(key string) string {
 		if v, ok := env[key]; ok && v != "" {
 			return v
 		}
-		return os.Getenv(key)
+		if localSources {
+			return os.Getenv(key)
+		}
+		return ""
 	}
-
-	home, _ := os.UserHomeDir()
 
 	auth := api.AuthConfig{
 		// Env-var sourced fields
@@ -69,32 +75,67 @@ func GatherAuthWithEnv(env map[string]string) api.AuthConfig {
 	// Mark whether GOOGLE_APPLICATION_CREDENTIALS was explicitly set via env var
 	auth.GoogleAppCredentialsExplicit = auth.GoogleAppCredentials != ""
 
-	// File-sourced fields: check well-known paths
-	if auth.GoogleAppCredentials == "" && home != "" {
-		adcPath := filepath.Join(home, ".config", "gcloud", "application_default_credentials.json")
-		if _, err := os.Stat(adcPath); err == nil {
-			auth.GoogleAppCredentials = adcPath
-		}
-	}
+	// File-sourced fields: check well-known paths (skip in broker mode)
+	if localSources {
+		home, _ := os.UserHomeDir()
 
-	if home != "" {
-		oauthPath := filepath.Join(home, ".gemini", "oauth_creds.json")
-		if _, err := os.Stat(oauthPath); err == nil {
-			auth.OAuthCreds = oauthPath
+		if auth.GoogleAppCredentials == "" && home != "" {
+			adcPath := filepath.Join(home, ".config", "gcloud", "application_default_credentials.json")
+			if _, err := os.Stat(adcPath); err == nil {
+				auth.GoogleAppCredentials = adcPath
+			}
 		}
 
-		codexPath := filepath.Join(home, ".codex", "auth.json")
-		if _, err := os.Stat(codexPath); err == nil {
-			auth.CodexAuthFile = codexPath
-		}
+		if home != "" {
+			oauthPath := filepath.Join(home, ".gemini", "oauth_creds.json")
+			if _, err := os.Stat(oauthPath); err == nil {
+				auth.OAuthCreds = oauthPath
+			}
 
-		opencodePath := filepath.Join(home, ".local", "share", "opencode", "auth.json")
-		if _, err := os.Stat(opencodePath); err == nil {
-			auth.OpenCodeAuthFile = opencodePath
+			codexPath := filepath.Join(home, ".codex", "auth.json")
+			if _, err := os.Stat(codexPath); err == nil {
+				auth.CodexAuthFile = codexPath
+			}
+
+			opencodePath := filepath.Join(home, ".local", "share", "opencode", "auth.json")
+			if _, err := os.Stat(opencodePath); err == nil {
+				auth.OpenCodeAuthFile = opencodePath
+			}
 		}
 	}
 
 	return auth
+}
+
+// OverlayFileSecrets bridges file-type ResolvedSecrets from the hub into
+// AuthConfig fields so that ResolveAuth can determine the correct auth method.
+// It maps well-known secret names/targets to the corresponding AuthConfig fields
+// using the target path as a sentinel value (the actual file content is projected
+// into the container by writeFileSecrets at launch time).
+func OverlayFileSecrets(auth *api.AuthConfig, secrets []api.ResolvedSecret) {
+	for _, s := range secrets {
+		if s.Type != "file" {
+			continue
+		}
+		target := s.Target
+		name := s.Name
+
+		switch {
+		case name == "GOOGLE_APPLICATION_CREDENTIALS" ||
+			strings.HasSuffix(target, "/application_default_credentials.json"):
+			auth.GoogleAppCredentials = target
+			auth.GoogleAppCredentialsExplicit = false // container GCP SDK auto-discovers well-known path
+		case name == "OAUTH_CREDS" ||
+			strings.HasSuffix(target, "/oauth_creds.json"):
+			auth.OAuthCreds = target
+		case name == "CODEX_AUTH" ||
+			strings.HasSuffix(target, "/.codex/auth.json"):
+			auth.CodexAuthFile = target
+		case name == "OPENCODE_AUTH" ||
+			strings.HasSuffix(target, "/opencode/auth.json"):
+			auth.OpenCodeAuthFile = target
+		}
+	}
 }
 
 // OverlaySettings applies settings-based overrides to an AuthConfig.

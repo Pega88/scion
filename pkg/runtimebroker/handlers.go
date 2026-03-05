@@ -448,7 +448,7 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 				)
 			}
 
-			var hubHas, brokerHas, needs []string
+			var hubHas, needs []string
 			for _, key := range required {
 				val, hasVal := env[key]
 				if hasVal && val != "" {
@@ -456,19 +456,13 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 					if _, fromHub := req.ResolvedEnv[key]; fromHub {
 						hubHas = append(hubHas, key)
 					} else {
-						brokerHas = append(brokerHas, key)
+						hubHas = append(hubHas, key)
 					}
 				} else if _, fromSecret := secretTargets[key]; fromSecret {
 					// Key will be projected from a resolved secret at container start
 					hubHas = append(hubHas, key)
 				} else {
-					// Check if broker can supply from its own env
-					if brokerVal := os.Getenv(key); brokerVal != "" {
-						env[key] = brokerVal
-						brokerHas = append(brokerHas, key)
-					} else {
-						needs = append(needs, key)
-					}
+					needs = append(needs, key)
 				}
 			}
 
@@ -486,7 +480,6 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 					s.envSecretLog.Debug("Env-gather: returning 202 with requirements",
 						"required", required,
 						"hubHas", hubHas,
-						"brokerHas", brokerHas,
 						"needs", needs,
 					)
 				}
@@ -506,7 +499,6 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 					AgentID:    req.ID,
 					Required:   required,
 					HubHas:     hubHas,
-					BrokerHas:  brokerHas,
 					Needs:      needs,
 					SecretInfo: respSecretInfo,
 				})
@@ -517,16 +509,16 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 				s.envSecretLog.Debug("Env-gather: all required keys satisfied, proceeding with start",
 					"required", required,
 					"hubHas", hubHas,
-					"brokerHas", brokerHas,
 				)
 			}
 		}
 	}
 
 	opts := api.StartOptions{
-		Name:      req.Name,
-		Detached:  boolPtr(!req.Attach),
-		GrovePath: req.GrovePath,
+		Name:       req.Name,
+		BrokerMode: true,
+		Detached:   boolPtr(!req.Attach),
+		GrovePath:  req.GrovePath,
 	}
 
 	if req.Config != nil {
@@ -1315,10 +1307,6 @@ func (s *Server) extractRequiredEnvKeys(req CreateAgentRequest) ([]string, map[s
 				satisfied := false
 				for _, key := range group {
 					if _, ok := envKeys[key]; ok {
-						satisfied = true
-						break
-					}
-					if brokerVal := os.Getenv(key); brokerVal != "" {
 						satisfied = true
 						break
 					}

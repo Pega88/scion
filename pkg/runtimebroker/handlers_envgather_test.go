@@ -189,8 +189,9 @@ profiles:
 	}
 }
 
-// TestEnvGather_BrokerHasKey tests that the broker checks its own environment
-// for missing keys before returning 202.
+// TestEnvGather_BrokerHasKey tests that the broker does NOT use its own
+// environment to satisfy missing keys — broker env should not leak into
+// hub-dispatched agents.
 func TestEnvGather_BrokerHasKey(t *testing.T) {
 	settings := `
 schema_version: "1"
@@ -203,9 +204,9 @@ profiles:
   default:
     runtime: mock
 `
-	srv, mgr, groveDir := newTestServerWithGrovePath(t, settings)
+	srv, _, groveDir := newTestServerWithGrovePath(t, settings)
 
-	// Set the keys in the broker's own environment
+	// Set the keys in the broker's own environment — these should NOT be used
 	t.Setenv("BROKER_LOCAL_KEY", "broker-value")
 	t.Setenv("ANTHROPIC_API_KEY", "broker-anthropic-key")
 
@@ -222,16 +223,31 @@ profiles:
 
 	srv.Handler().ServeHTTP(w, req)
 
-	// Should succeed (broker satisfies the key from its own env)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	// Should return 202 (needs) because broker env is no longer used
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d: %s", w.Code, w.Body.String())
 	}
 
-	if mgr.lastEnv == nil {
-		t.Fatal("expected env to be set")
+	var envReqs EnvRequirementsResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &envReqs); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
 	}
-	if mgr.lastEnv["BROKER_LOCAL_KEY"] != "broker-value" {
-		t.Errorf("expected BROKER_LOCAL_KEY='broker-value', got %q", mgr.lastEnv["BROKER_LOCAL_KEY"])
+
+	// BROKER_LOCAL_KEY should be in needs, not satisfied by broker env
+	found := false
+	for _, k := range envReqs.Needs {
+		if k == "BROKER_LOCAL_KEY" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected BROKER_LOCAL_KEY in needs, got needs=%v", envReqs.Needs)
+	}
+
+	// BrokerHas should be empty
+	if len(envReqs.BrokerHas) > 0 {
+		t.Errorf("expected BrokerHas to be empty, got %v", envReqs.BrokerHas)
 	}
 }
 

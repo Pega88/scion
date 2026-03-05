@@ -334,7 +334,7 @@ func TestGatherAuthWithEnv_OverlayTakesPrecedence(t *testing.T) {
 		"GEMINI_API_KEY": "overlay-gemini",
 	}
 
-	auth := GatherAuthWithEnv(overlay)
+	auth := GatherAuthWithEnv(overlay, true)
 
 	if auth.GeminiAPIKey != "overlay-gemini" {
 		t.Errorf("GeminiAPIKey = %q, want %q (overlay should take precedence)", auth.GeminiAPIKey, "overlay-gemini")
@@ -350,7 +350,7 @@ func TestGatherAuthWithEnv_NilOverlay(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "process-openai")
 
 	// nil overlay should behave identically to GatherAuth
-	auth := GatherAuthWithEnv(nil)
+	auth := GatherAuthWithEnv(nil, true)
 
 	if auth.GeminiAPIKey != "process-gemini" {
 		t.Errorf("GeminiAPIKey = %q, want %q", auth.GeminiAPIKey, "process-gemini")
@@ -432,7 +432,7 @@ func TestGatherAuthWithEnv_EmptyOverlayValueFallsThrough(t *testing.T) {
 		"GEMINI_API_KEY": "",
 	}
 
-	auth := GatherAuthWithEnv(overlay)
+	auth := GatherAuthWithEnv(overlay, true)
 
 	if auth.GeminiAPIKey != "process-gemini" {
 		t.Errorf("GeminiAPIKey = %q, want %q (empty overlay should fall through)", auth.GeminiAPIKey, "process-gemini")
@@ -450,7 +450,7 @@ func TestGatherAuthWithEnv_OverlayProjectFallbacks(t *testing.T) {
 		"GCP_PROJECT": "overlay-project",
 	}
 
-	auth := GatherAuthWithEnv(overlay)
+	auth := GatherAuthWithEnv(overlay, true)
 
 	if auth.GoogleCloudProject != "overlay-project" {
 		t.Errorf("GoogleCloudProject = %q, want %q (overlay fallback)", auth.GoogleCloudProject, "overlay-project")
@@ -483,7 +483,7 @@ func TestGatherAuthWithEnv_OverlayAllKeys(t *testing.T) {
 		"GOOGLE_APPLICATION_CREDENTIALS": "/ov/creds.json",
 	}
 
-	auth := GatherAuthWithEnv(overlay)
+	auth := GatherAuthWithEnv(overlay, true)
 
 	if auth.GeminiAPIKey != "ov-gemini" {
 		t.Errorf("GeminiAPIKey = %q, want %q", auth.GeminiAPIKey, "ov-gemini")
@@ -566,5 +566,134 @@ func TestOverlaySettings_NoScionAgentJSON(t *testing.T) {
 
 	if auth.SelectedType != "" {
 		t.Errorf("SelectedType = %q, want empty", auth.SelectedType)
+	}
+}
+
+func TestGatherAuthWithEnv_BrokerMode(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	// Set broker-local env vars that should NOT leak into broker mode
+	t.Setenv("GEMINI_API_KEY", "broker-gemini")
+	t.Setenv("ANTHROPIC_API_KEY", "broker-anthropic")
+	t.Setenv("GOOGLE_APPLICATION_CREDENTIALS", "")
+
+	// Create credential files on the broker filesystem
+	adcPath := filepath.Join(tmpHome, ".config", "gcloud", "application_default_credentials.json")
+	os.MkdirAll(filepath.Dir(adcPath), 0755)
+	os.WriteFile(adcPath, []byte(`{"type":"authorized_user"}`), 0644)
+
+	oauthPath := filepath.Join(tmpHome, ".gemini", "oauth_creds.json")
+	os.MkdirAll(filepath.Dir(oauthPath), 0755)
+	os.WriteFile(oauthPath, []byte(`{"dummy":"oauth"}`), 0644)
+
+	// Call with localSources=false and an overlay that provides one key
+	overlay := map[string]string{
+		"ANTHROPIC_API_KEY": "hub-anthropic",
+	}
+	auth := GatherAuthWithEnv(overlay, false)
+
+	// Overlay key should be present
+	if auth.AnthropicAPIKey != "hub-anthropic" {
+		t.Errorf("AnthropicAPIKey = %q, want %q (from overlay)", auth.AnthropicAPIKey, "hub-anthropic")
+	}
+
+	// Broker env should NOT leak through
+	if auth.GeminiAPIKey != "" {
+		t.Errorf("GeminiAPIKey = %q, want empty (broker env should not leak)", auth.GeminiAPIKey)
+	}
+
+	// Filesystem creds should NOT be discovered
+	if auth.GoogleAppCredentials != "" {
+		t.Errorf("GoogleAppCredentials = %q, want empty (filesystem should not be scanned)", auth.GoogleAppCredentials)
+	}
+	if auth.OAuthCreds != "" {
+		t.Errorf("OAuthCreds = %q, want empty (filesystem should not be scanned)", auth.OAuthCreds)
+	}
+}
+
+func TestOverlayFileSecrets(t *testing.T) {
+	tests := []struct {
+		name    string
+		secrets []api.ResolvedSecret
+		check   func(t *testing.T, auth api.AuthConfig)
+	}{
+		{
+			name: "ADC by name",
+			secrets: []api.ResolvedSecret{
+				{Name: "GOOGLE_APPLICATION_CREDENTIALS", Type: "file", Target: "/home/gemini/.config/gcloud/application_default_credentials.json"},
+			},
+			check: func(t *testing.T, auth api.AuthConfig) {
+				if auth.GoogleAppCredentials != "/home/gemini/.config/gcloud/application_default_credentials.json" {
+					t.Errorf("GoogleAppCredentials = %q, want ADC path", auth.GoogleAppCredentials)
+				}
+				if auth.GoogleAppCredentialsExplicit {
+					t.Errorf("GoogleAppCredentialsExplicit should be false for ADC overlay")
+				}
+			},
+		},
+		{
+			name: "ADC by target suffix",
+			secrets: []api.ResolvedSecret{
+				{Name: "my-adc", Type: "file", Target: "/home/gemini/.config/gcloud/application_default_credentials.json"},
+			},
+			check: func(t *testing.T, auth api.AuthConfig) {
+				if auth.GoogleAppCredentials == "" {
+					t.Error("GoogleAppCredentials should be set from target suffix match")
+				}
+			},
+		},
+		{
+			name: "OAuth by name",
+			secrets: []api.ResolvedSecret{
+				{Name: "OAUTH_CREDS", Type: "file", Target: "/home/gemini/.gemini/oauth_creds.json"},
+			},
+			check: func(t *testing.T, auth api.AuthConfig) {
+				if auth.OAuthCreds != "/home/gemini/.gemini/oauth_creds.json" {
+					t.Errorf("OAuthCreds = %q, want oauth path", auth.OAuthCreds)
+				}
+			},
+		},
+		{
+			name: "Codex by name",
+			secrets: []api.ResolvedSecret{
+				{Name: "CODEX_AUTH", Type: "file", Target: "/home/gemini/.codex/auth.json"},
+			},
+			check: func(t *testing.T, auth api.AuthConfig) {
+				if auth.CodexAuthFile != "/home/gemini/.codex/auth.json" {
+					t.Errorf("CodexAuthFile = %q, want codex path", auth.CodexAuthFile)
+				}
+			},
+		},
+		{
+			name: "OpenCode by target suffix",
+			secrets: []api.ResolvedSecret{
+				{Name: "my-opencode", Type: "file", Target: "/home/gemini/.local/share/opencode/auth.json"},
+			},
+			check: func(t *testing.T, auth api.AuthConfig) {
+				if auth.OpenCodeAuthFile != "/home/gemini/.local/share/opencode/auth.json" {
+					t.Errorf("OpenCodeAuthFile = %q, want opencode path", auth.OpenCodeAuthFile)
+				}
+			},
+		},
+		{
+			name: "non-file secrets are skipped",
+			secrets: []api.ResolvedSecret{
+				{Name: "GOOGLE_APPLICATION_CREDENTIALS", Type: "environment", Target: "GOOGLE_APPLICATION_CREDENTIALS", Value: "/some/path"},
+			},
+			check: func(t *testing.T, auth api.AuthConfig) {
+				if auth.GoogleAppCredentials != "" {
+					t.Errorf("GoogleAppCredentials = %q, want empty (env-type secret should be skipped)", auth.GoogleAppCredentials)
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			auth := api.AuthConfig{}
+			OverlayFileSecrets(&auth, tt.secrets)
+			tt.check(t, auth)
+		})
 	}
 }

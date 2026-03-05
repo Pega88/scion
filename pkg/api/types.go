@@ -457,6 +457,7 @@ type StartOptions struct {
 	GrovePath       string
 	Env             map[string]string
 	ResolvedSecrets []ResolvedSecret
+	BrokerMode      bool // When true, auth gathering skips local sources (broker env + filesystem)
 	Detached        *bool
 	Resume          bool
 	NoAuth          bool

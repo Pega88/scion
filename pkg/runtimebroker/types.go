@@ -253,7 +253,7 @@ type EnvRequirementsResponse struct {
 	AgentID    string                      `json:"agentId"`
 	Required   []string                    `json:"required"`
 	HubHas     []string                    `json:"hubHas"`
-	BrokerHas  []string                    `json:"brokerHas"`
+	BrokerHas  []string                    `json:"brokerHas"` // Deprecated: always empty; kept for API compatibility
 	Needs      []string                    `json:"needs"`
 	SecretInfo map[string]api.SecretKeyInfo `json:"secretInfo,omitempty"`
 }

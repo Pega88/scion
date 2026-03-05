@@ -260,8 +260,11 @@ func (m *AgentManager) Start(ctx context.Context, opts api.StartOptions) (*api.A
 	var auth api.AuthConfig
 	var resolvedAuth *api.ResolvedAuth
 	if !opts.NoAuth {
-		auth = harness.GatherAuthWithEnv(opts.Env)
-		util.Debugf("auth: gathered credentials — selectedType=%q, hasGeminiKey=%t, hasGoogleKey=%t, hasOAuth=%t, hasADC=%t, hasAnthropicKey=%t, cloudProject=%q",
+		auth = harness.GatherAuthWithEnv(opts.Env, !opts.BrokerMode)
+		if opts.BrokerMode {
+			harness.OverlayFileSecrets(&auth, opts.ResolvedSecrets)
+		}
+		util.Debugf("auth: gathered credentials — selectedType=%q, hasGeminiKey=%t, hasGoogleKey=%t, hasOAuth=%t, hasADC=%t, hasAnthropicKey=%t, cloudProject=%q, brokerMode=%t",
 			auth.SelectedType,
 			auth.GeminiAPIKey != "",
 			auth.GoogleAPIKey != "",
@@ -269,12 +272,18 @@ func (m *AgentManager) Start(ctx context.Context, opts api.StartOptions) (*api.A
 			auth.GoogleAppCredentials != "",
 			auth.AnthropicAPIKey != "",
 			auth.GoogleCloudProject,
+			opts.BrokerMode,
 		)
 		harness.OverlaySettings(&auth, h, agentHome)
 		util.Debugf("auth: after overlay — selectedType=%q", auth.SelectedType)
 		resolved, err := h.ResolveAuth(auth)
 		if err != nil {
 			return nil, fmt.Errorf("auth resolution failed: %w", err)
+		}
+		if opts.BrokerMode {
+			// File projection is handled by writeFileSecrets() from ResolvedSecrets
+			// at container launch, not by applyResolvedAuth from local paths.
+			resolved.Files = nil
 		}
 		util.Debugf("auth: resolved — method=%q, envVars=%v, files=%d", resolved.Method, resolved.EnvVars, len(resolved.Files))
 		if err := harness.ValidateAuth(resolved); err != nil {
