@@ -604,6 +604,14 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 	// Always set env (may be empty, which is fine)
 	opts.Env = env
 
+	// Translate SCION_TELEMETRY_ENABLED from the merged env into the
+	// TelemetryOverride field so that Start() uses it as a proper override
+	// (enabling harness telemetry env injection and cloud config merging).
+	if v, ok := env["SCION_TELEMETRY_ENABLED"]; ok {
+		enabled := v == "true" || v == "1"
+		opts.TelemetryOverride = &enabled
+	}
+
 	// Pass through resolved secrets from the Hub
 	if len(req.ResolvedSecrets) > 0 {
 		opts.ResolvedSecrets = req.ResolvedSecrets
@@ -924,6 +932,14 @@ func (s *Server) startAgent(w http.ResponseWriter, r *http.Request, id string) {
 		if s.config.Debug {
 			s.agentLifecycleLog.Debug("startAgent: applied resolved env from hub", "count", len(startReq.ResolvedEnv))
 		}
+	}
+
+	// Translate SCION_TELEMETRY_ENABLED from hub-resolved env into the
+	// TelemetryOverride field so that Start() uses it as a proper override
+	// (enabling harness telemetry env injection and cloud config merging).
+	if v, ok := startReq.ResolvedEnv["SCION_TELEMETRY_ENABLED"]; ok {
+		enabled := v == "true" || v == "1"
+		opts.TelemetryOverride = &enabled
 	}
 
 	// Apply broker-level env enrichment (hub endpoint, broker name, debug)
@@ -1677,6 +1693,12 @@ func (s *Server) finalizeEnv(w http.ResponseWriter, r *http.Request, id string) 
 	}
 
 	opts.Env = pending.MergedEnv
+
+	// Translate SCION_TELEMETRY_ENABLED into TelemetryOverride (same as createAgent/startAgent).
+	if v, ok := pending.MergedEnv["SCION_TELEMETRY_ENABLED"]; ok {
+		enabled := v == "true" || v == "1"
+		opts.TelemetryOverride = &enabled
+	}
 
 	// Pass through resolved secrets
 	if len(origReq.ResolvedSecrets) > 0 {

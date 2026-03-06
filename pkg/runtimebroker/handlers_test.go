@@ -1950,6 +1950,59 @@ func TestStartAgentGroveSlugNotUsedWhenGrovePathSet(t *testing.T) {
 	}
 }
 
+func TestStartAgentTelemetryOverrideFromResolvedEnv(t *testing.T) {
+	// When resolvedEnv contains SCION_TELEMETRY_ENABLED=true, startAgent
+	// should translate it to opts.TelemetryOverride so that Start() enables
+	// harness telemetry env injection and cloud config merging.
+	srv, mgr := newTestServerWithProvisionCapture()
+
+	body := `{"resolvedEnv": {"SCION_TELEMETRY_ENABLED": "true"}}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents/telemetry-agent/start", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusAccepted, w.Code, w.Body.String())
+	}
+	if !mgr.startCalled {
+		t.Fatal("expected Start to be called")
+	}
+	if mgr.lastOpts.TelemetryOverride == nil {
+		t.Fatal("expected TelemetryOverride to be set")
+	}
+	if !*mgr.lastOpts.TelemetryOverride {
+		t.Error("expected TelemetryOverride to be true")
+	}
+}
+
+func TestStartAgentTelemetryOverrideDisabled(t *testing.T) {
+	// When resolvedEnv contains SCION_TELEMETRY_ENABLED=false, startAgent
+	// should set TelemetryOverride to false.
+	srv, mgr := newTestServerWithProvisionCapture()
+
+	body := `{"resolvedEnv": {"SCION_TELEMETRY_ENABLED": "false"}}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents/telemetry-agent/start", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	srv.Handler().ServeHTTP(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusAccepted, w.Code, w.Body.String())
+	}
+	if !mgr.startCalled {
+		t.Fatal("expected Start to be called")
+	}
+	if mgr.lastOpts.TelemetryOverride == nil {
+		t.Fatal("expected TelemetryOverride to be set")
+	}
+	if *mgr.lastOpts.TelemetryOverride {
+		t.Error("expected TelemetryOverride to be false")
+	}
+}
+
 func TestCreateAgentGroveSlugInitializesScionDir(t *testing.T) {
 	restore := config.OverrideRuntimeDetection(
 		func(file string) (string, error) { return "/usr/bin/" + file, nil },

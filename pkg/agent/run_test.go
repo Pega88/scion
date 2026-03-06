@@ -1112,6 +1112,96 @@ profiles:
 	})
 }
 
+func TestSettingsTelemetryMergedIntoStart(t *testing.T) {
+	// Verify that telemetry cloud config from settings.yaml gets merged into
+	// the container env vars during Start(), enabling cloud export.
+	tmpDir := t.TempDir()
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	originalHome := os.Getenv("HOME")
+	defer os.Setenv("HOME", originalHome)
+	os.Setenv("HOME", tmpDir)
+
+	globalScionDir := filepath.Join(tmpDir, ".scion")
+
+	hcDir := filepath.Join(globalScionDir, "harness-configs", "test-harness")
+	os.MkdirAll(hcDir, 0755)
+	os.WriteFile(filepath.Join(hcDir, "config.yaml"), []byte("harness: gemini\nuser: scion\nimage: test-image:latest\n"), 0644)
+
+	tplDir := filepath.Join(globalScionDir, "templates", "default")
+	os.MkdirAll(tplDir, 0755)
+	os.WriteFile(filepath.Join(tplDir, "scion-agent.json"), []byte(`{"default_harness_config": "test-harness"}`), 0644)
+
+	// Settings with telemetry cloud config but telemetry.enabled: false
+	// (the override should enable it)
+	os.WriteFile(filepath.Join(globalScionDir, "settings.yaml"), []byte(`schema_version: "1"
+active_profile: local
+profiles:
+  local:
+    runtime: docker
+telemetry:
+  enabled: false
+  cloud:
+    enabled: true
+    endpoint: cloudtrace.googleapis.com:443
+    protocol: grpc
+`), 0644)
+
+	projectDir := filepath.Join(tmpDir, "project")
+	projectScionDir := filepath.Join(projectDir, ".scion")
+	os.MkdirAll(projectScionDir, 0755)
+
+	boolPtr := func(b bool) *bool { return &b }
+
+	var capturedConfig runtime.RunConfig
+	mockRT := &runtime.MockRuntime{
+		ListFunc: func(ctx context.Context, labelFilter map[string]string) ([]api.AgentInfo, error) {
+			return []api.AgentInfo{}, nil
+		},
+		RunFunc: func(ctx context.Context, config runtime.RunConfig) (string, error) {
+			capturedConfig = config
+			return "mock-id", nil
+		},
+	}
+
+	agentDir := filepath.Join(projectScionDir, "agents", "settings-telem")
+	os.MkdirAll(filepath.Join(agentDir, "home"), 0755)
+	os.WriteFile(filepath.Join(agentDir, "scion-agent.json"), []byte(`{
+		"harness": "gemini"
+	}`), 0644)
+
+	mgr := NewManager(mockRT)
+	env := make(map[string]string)
+	_, err := mgr.Start(context.Background(), api.StartOptions{
+		Name:              "settings-telem",
+		GrovePath:         projectScionDir,
+		NoAuth:            true,
+		TelemetryOverride: boolPtr(true),
+		Env:               env,
+	})
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	if !capturedConfig.TelemetryEnabled {
+		t.Error("expected TelemetryEnabled = true")
+	}
+
+	// Verify that cloud config env vars from settings were injected
+	if got := env["SCION_OTEL_ENDPOINT"]; got != "cloudtrace.googleapis.com:443" {
+		t.Errorf("SCION_OTEL_ENDPOINT = %q, want %q", got, "cloudtrace.googleapis.com:443")
+	}
+	if got := env["SCION_OTEL_PROTOCOL"]; got != "grpc" {
+		t.Errorf("SCION_OTEL_PROTOCOL = %q, want %q", got, "grpc")
+	}
+	if got := env["SCION_TELEMETRY_CLOUD_ENABLED"]; got != "true" {
+		t.Errorf("SCION_TELEMETRY_CLOUD_ENABLED = %q, want %q", got, "true")
+	}
+}
+
 func TestHarnessAuthOverrideFlag(t *testing.T) {
 	// Verify that HarnessAuth in StartOptions takes highest priority,
 	// overriding the auth_selected_type from scion-agent.json.

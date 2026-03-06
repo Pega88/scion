@@ -212,6 +212,16 @@ func (m *AgentManager) Start(ctx context.Context, opts api.StartOptions) (*api.A
 		if profileName == "" {
 			profileName = settings.ActiveProfile
 		}
+		// Merge settings-level telemetry config into finalScionCfg so that
+		// cloud export configuration (endpoint, protocol, batch, etc.) and
+		// the TelemetryEnabled flag are available at start time. This mirrors
+		// the merge in ProvisionAgent.
+		if settings.Telemetry != nil {
+			settingsCfg := &api.ScionConfig{
+				Telemetry: config.ConvertV1TelemetryToAPI(settings.Telemetry),
+			}
+			finalScionCfg = config.MergeScionConfig(settingsCfg, finalScionCfg)
+		}
 	}
 
 	var warnings []string
