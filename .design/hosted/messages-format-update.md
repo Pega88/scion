@@ -5,7 +5,7 @@
 
 ## Summary
 
-This document proposes upgrading Scion's messaging system from plain-text strings to structured JSON messages with well-defined fields, and lays the foundation for extensible notification channels and a future message broker architecture. Structured messages become the default; a `--plain` CLI flag preserves the current raw-text behavior.
+This document proposes upgrading Scion's messaging system from plain-text strings to structured JSON messages with well-defined fields, and lays the foundation for extensible notification channels and a future message broker architecture. Structured messages become the default; a `--plain` CLI flag marks the message for plain-text delivery at the agent harness boundary while still flowing through the system as structured JSON.
 
 ---
 
@@ -89,11 +89,11 @@ This architecture is relevant because system notifications are a sender type tha
 {
   "version": 1,
   "timestamp": "2026-03-07T14:30:00Z",
-  "id": "msg_abc123",
   "sender": "user:alice",
   "recipient": "agent:code-reviewer",
   "msg": "Please review the auth module changes",
   "type": "instruction",
+  "plain": false,
   "urgent": false,
   "broadcasted": false,
   "attachments": ["src/auth/handler.go", "src/auth/middleware.go"]
@@ -106,14 +106,16 @@ This architecture is relevant because system notifications are a sender type tha
 |-------|------|----------|-------------|
 | `version` | `int` | Yes | Schema version for forward compatibility. Currently `1`. |
 | `timestamp` | `string` (ISO 8601) | Yes | UTC time when the message was created. Set by the originating system (CLI, Hub, or notification dispatcher). |
-| `id` | `string` | Yes | Unique message identifier. Format: `msg_<uuid>`. Generated at message creation. |
 | `sender` | `string` | Yes | Identity of the sender. Format: `<type>:<identifier>` (see Section 2.3). |
 | `recipient` | `string` | Yes | Identity of the intended recipient. Same format as sender. **Stripped before delivery to recipient** (see Section 5). |
 | `msg` | `string` | Yes | The human-readable message body. |
-| `type` | `string` | Yes | Message classification (see Section 2.4). |
+| `type` | `string` | Yes | Message classification. Closed enum (see Section 2.4). |
+| `plain` | `bool` | No | `true` if sent with `--plain` flag. When true, only the raw `msg` text is delivered to the agent harness (the structured envelope is still used internally for routing and logging). Default `false`. |
 | `urgent` | `bool` | No | `true` if sent with `--interrupt` flag. Default `false`. |
 | `broadcasted` | `bool` | No | `true` if sent with `--broadcast` or `--all` flag. Default `false`. |
-| `attachments` | `[]string` | No | List of relative file paths in the workspace. Omitted if empty. |
+| `attachments` | `[]string` | No | List of relative file paths in the workspace (path reference only). Omitted if empty. Max 10 items. |
+
+**Message size limit**: 64KB for the `msg` field.
 
 ### 2.3 Sender/Recipient Identity Format
 
@@ -121,27 +123,27 @@ The identity string uses a `<type>:<identifier>` format:
 
 | Type | Example | Description |
 |------|---------|-------------|
-| `user:<username>` | `user:alice` | Human user (resolved from Hub identity or local user) |
+| `user:<username>` | `user:alice` | Human user (resolved from Hub identity) |
 | `agent:<slug>` | `agent:code-reviewer` | An agent in the system |
-| `system:<subsystem>` | `system:notifications` | System-generated messages |
-| `system:<agent-slug>` | `system:code-reviewer` | System notification about a specific agent (the subject of the notification is the sender) |
+| `system:<subsystem>` | `system:notifications` | System-generated messages (non-agent-specific) |
 | `grove:<grove-name>` | `grove:my-project` | Used as recipient for grove-wide broadcasts |
 | `all` | `all` | Used as recipient for global broadcasts |
 
-For system notifications about agent state changes, the sender is `system:<agent-slug>` where `<agent-slug>` is the agent whose state changed. This follows the user's requirement that the subject of the notification should be the sender.
+For system notifications about agent state changes (e.g., an agent completing or needing input), the sender is `agent:<agent-slug>` — the agent whose state changed is represented as the sender, even though the system is the delivery mechanism. This makes the message semantically clear to the recipient: the notification is "from" that agent.
 
 ### 2.4 Message Types
 
+Message types are a **closed enum** validated at send time. New types require a schema version bump.
+
 | Type | Description | Typical Sender |
 |------|-------------|----------------|
-| `instruction` | A task or directive for the recipient to act on | user, agent |
+| `instruction` | A task, directive, or general user message for the recipient to act on | user, agent |
 | `input-needed` | Corresponds to `waiting_for_input` state; requests human/agent intervention | system |
 | `state-change` | Notification about an agent's lifecycle/activity state change | system |
-| `info` | Informational message, no action required | any |
-| `response` | Reply to a previous message or query | agent |
-| `query` | A question expecting a response | user, agent |
 
-The `type` field is advisory - it helps recipients (especially LLMs) understand intent but does not gate behavior. New types can be added without breaking existing consumers.
+The `type` field is set automatically based on context:
+- User and agent messages default to `instruction`.
+- System notifications set `state-change` or `input-needed` based on the agent state transition.
 
 ### 2.5 Example Messages by Scenario
 
@@ -150,7 +152,6 @@ The `type` field is advisory - it helps recipients (especially LLMs) understand 
 {
   "version": 1,
   "timestamp": "2026-03-07T14:30:00Z",
-  "id": "msg_a1b2c3",
   "sender": "user:alice",
   "recipient": "agent:backend-dev",
   "msg": "Implement the auth module with JWT support",
@@ -161,16 +162,15 @@ The `type` field is advisory - it helps recipients (especially LLMs) understand 
 }
 ```
 
-**Agent broadcasts query to grove:**
+**Agent broadcasts to grove:**
 ```json
 {
   "version": 1,
   "timestamp": "2026-03-07T14:35:00Z",
-  "id": "msg_d4e5f6",
   "sender": "agent:lead-agent",
   "recipient": "grove:my-project",
   "msg": "Has anyone modified the database schema in the last hour?",
-  "type": "query",
+  "type": "instruction",
   "broadcasted": true
 }
 ```
@@ -180,8 +180,7 @@ The `type` field is advisory - it helps recipients (especially LLMs) understand 
 {
   "version": 1,
   "timestamp": "2026-03-07T15:00:00Z",
-  "id": "msg_g7h8i9",
-  "sender": "system:backend-dev",
+  "sender": "agent:backend-dev",
   "recipient": "agent:lead-agent",
   "msg": "backend-dev has reached a state of COMPLETED: Auth module implemented with JWT middleware",
   "type": "state-change"
@@ -193,8 +192,7 @@ The `type` field is advisory - it helps recipients (especially LLMs) understand 
 {
   "version": 1,
   "timestamp": "2026-03-07T15:10:00Z",
-  "id": "msg_j0k1l2",
-  "sender": "system:frontend-dev",
+  "sender": "agent:frontend-dev",
   "recipient": "agent:lead-agent",
   "msg": "frontend-dev is WAITING_FOR_INPUT: Should I use the existing API client or create a new one?",
   "type": "input-needed"
@@ -213,20 +211,23 @@ scion message [agent] <message> [flags]
 Existing flags (unchanged behavior):
   -i, --interrupt      Interrupt the harness before sending
   -b, --broadcast      Send to all running agents in grove
-  -a, --all            Send to all running agents across groves
+  -a, --all            Send to all running agents across groves (admin only)
       --in <duration>  Schedule delivery after duration
       --at <time>      Schedule delivery at absolute time
 
 New flags:
-      --plain          Send as plain text (bypass structured format)
-      --type <type>    Message type (default: "instruction")
+      --plain          Mark for plain-text delivery (message still flows as structured JSON internally)
       --attach <path>  Attach file path(s), repeatable
 ```
+
+The `--all` flag requires admin privileges and must be restricted accordingly.
+
+The message `type` is **not** a CLI flag — it is inferred automatically from context (user/agent messages are `instruction`; system notifications set `state-change` or `input-needed`).
 
 ### 3.2 Default Behavior Change
 
 **Before**: All messages are plain text.
-**After**: All messages are structured JSON by default. `--plain` flag restores plain-text behavior.
+**After**: All messages are structured JSON by default. `--plain` flag marks the message for raw-text delivery at the harness boundary.
 
 When a user runs:
 ```bash
@@ -234,29 +235,31 @@ scion message backend-dev "implement auth"
 ```
 
 The CLI constructs a `StructuredMessage` with:
-- `sender`: resolved from Hub identity (user JWT) or local username
+- `sender`: resolved from Hub identity (user JWT)
 - `recipient`: `agent:backend-dev`
-- `type`: `"instruction"` (default)
+- `type`: `"instruction"` (default for user/agent messages)
+- `plain`: `false`
 - `urgent`: from `--interrupt` flag
 - `broadcasted`: from `--broadcast`/`--all` flags
 - `timestamp`: current UTC time
-- `id`: generated UUID
 
 When `--plain` is used:
 ```bash
 scion message --plain backend-dev "just send this raw text"
 ```
-The message is sent as-is (current behavior), with no JSON wrapping.
+The message is still wrapped in a `StructuredMessage` for internal routing and logging, but with `plain: true`. At harness delivery time, only the raw `msg` text is injected via tmux — no JSON envelope or delimiters.
+
+**Empty messages** (no message body) are always sent as a plain tmux `Enter` keypress to trigger confirmations, regardless of the `--plain` flag.
 
 ### 3.3 Sender Resolution
 
 | Context | Sender Value |
 |---------|-------------|
 | Human user, Hub mode | `user:<username>` from Hub identity/JWT claims |
-| Human user, local mode | `user:<os-username>` from `os/user.Current()` |
 | Agent, Hub mode | `agent:<agent-slug>` from agent JWT subject |
-| Agent, local mode | `agent:<agent-slug>` from `SCION_AGENT_SLUG` env var |
-| System notification | `system:<subject-agent-slug>` |
+| System notification | `agent:<subject-agent-slug>` (the agent whose state changed) |
+
+Agent messaging requires a Hub connection — without a Hub, there is no means for an agent to send a message.
 
 ---
 
@@ -271,13 +274,14 @@ CLI (cmd/message.go):
   1. Resolve sender identity
   2. Build StructuredMessage{...}
   3. Serialize to JSON
-  4. Send via Hub API or local manager
+  4. Send via Hub API
 
 Hub API (POST /agents/{id}/message):
   Body: { "structured_message": {...}, "interrupt": false }
 
 Hub -> Broker -> Container:
-  tmux send-keys delivers formatted text (see Section 5)
+  If plain=true: tmux send-keys delivers raw msg text only
+  If plain=false: tmux send-keys delivers formatted text (see Section 5)
 ```
 
 ### 4.2 Agent -> Agent (via CLI inside container)
@@ -291,9 +295,10 @@ Same flow as user->agent, but:
 ```
 NotificationDispatcher.storeAndDispatch():
   1. Build StructuredMessage from agent state event
-  2. Set sender = "system:<watched-agent-slug>"
+  2. Set sender = "agent:<watched-agent-slug>"
   3. Set type = "state-change" or "input-needed"
   4. Dispatch via DispatchAgentMessage with structured payload
+  5. At delivery: if plain=true, unwrap and deliver raw msg only
 ```
 
 ### 4.4 System -> User (web notification)
@@ -321,9 +326,9 @@ For broadcasts, each fan-out copy gets:
 
 ## 5. Harness Delivery Format
 
-### 5.1 Plain-Text Wrapper for Agents
+### 5.1 Structured Message Delivery (default)
 
-When a structured message is delivered to an agent via tmux send-keys, it is wrapped in a plain-text introduction to ensure LLM comprehension:
+When a structured message (with `plain: false`) is delivered to an agent via tmux send-keys, it is wrapped in a plain-text introduction to ensure LLM comprehension:
 
 ```
 You are receiving a message from the orchestration system:
@@ -332,7 +337,6 @@ You are receiving a message from the orchestration system:
 {
   "version": 1,
   "timestamp": "2026-03-07T14:30:00Z",
-  "id": "msg_a1b2c3",
   "sender": "user:alice",
   "msg": "Implement the auth module with JWT support",
   "type": "instruction",
@@ -344,18 +348,25 @@ You are receiving a message from the orchestration system:
 ```
 
 Key points:
-- The `recipient` field is **stripped** before delivery (the agent doesn't need to know its own identity from the message).
+- The `recipient` and `id` fields are **stripped** before delivery (the agent doesn't need its own identity from the message, and stripping `id` saves tokens).
 - The delimiters (`---BEGIN/END SCION MESSAGE---`) make it easy for LLMs and harness tooling to parse.
 - The plain-text intro ensures the LLM understands this is a system-mediated message, not arbitrary user input.
 
 ### 5.2 Plain Mode Delivery
 
-When `--plain` is used, the message is sent as-is (current behavior):
+When `plain: true`, the message is delivered as raw text only (current behavior):
 ```
 tmux send-keys -t scion "just send this raw text" Enter
 ```
 
-### 5.3 Harness-Specific Considerations
+### 5.3 Empty Message Delivery
+
+Empty messages (no message body) are always sent as a plain tmux `Enter` keypress to trigger confirmations in the harness UI:
+```
+tmux send-keys -t scion Enter
+```
+
+### 5.4 Harness-Specific Considerations
 
 Different harnesses may need different wrapping strategies:
 
@@ -378,7 +389,7 @@ The `MessageRequest` struct (used in both Hub and Runtime Broker) expands to sup
 ```go
 // MessageRequest is the request body for sending a message to an agent.
 type MessageRequest struct {
-    // Plain text message (existing field, used for --plain mode)
+    // Plain text message (existing field, used for legacy clients)
     Message string `json:"message,omitempty"`
 
     // Structured message (new field, used by default)
@@ -392,11 +403,11 @@ type MessageRequest struct {
 type StructuredMessage struct {
     Version     int      `json:"version"`
     Timestamp   string   `json:"timestamp"`
-    ID          string   `json:"id"`
     Sender      string   `json:"sender"`
     Recipient   string   `json:"recipient"`
     Msg         string   `json:"msg"`
     Type        string   `json:"type"`
+    Plain       bool     `json:"plain,omitempty"`
     Urgent      bool     `json:"urgent,omitempty"`
     Broadcasted bool     `json:"broadcasted,omitempty"`
     Attachments []string `json:"attachments,omitempty"`
@@ -430,55 +441,40 @@ The `CreateScheduledEventRequest` payload already stores arbitrary JSON. The str
 
 ## 7. Storage and Logging
 
-### 7.1 Message Log (New)
+### 7.1 Structured Logging (Primary)
 
-For audit, debugging, and future message broker use, messages should be logged to a dedicated store.
-
-**Option A: Hub Database Table (Selected for Phase 1)**
-
-```sql
-CREATE TABLE messages (
-    id TEXT PRIMARY KEY,
-    grove_id TEXT NOT NULL,
-    sender TEXT NOT NULL,
-    recipient TEXT NOT NULL,
-    type TEXT NOT NULL,
-    msg TEXT NOT NULL,
-    urgent BOOLEAN DEFAULT FALSE,
-    broadcasted BOOLEAN DEFAULT FALSE,
-    attachments TEXT,          -- JSON array
-    created_at TIMESTAMP NOT NULL,
-    delivered_at TIMESTAMP,
-    delivery_status TEXT DEFAULT 'pending'  -- pending, delivered, failed
-);
-
-CREATE INDEX idx_messages_grove ON messages(grove_id);
-CREATE INDEX idx_messages_sender ON messages(sender);
-CREATE INDEX idx_messages_recipient ON messages(recipient);
-CREATE INDEX idx_messages_created ON messages(created_at);
-```
-
-Messages are stored at the Hub before dispatch. Delivery status is updated after broker confirms receipt.
-
-**Option B: Append-Only Log File (Deferred)**
-
-For local mode or broker-side logging, messages are appended to a structured log file (JSON lines). This is useful for agent-to-agent message history without a Hub.
-
-### 7.2 Structured Logging Integration
+Messages are not persisted to a database. Instead, they are captured via structured logging at the Hub layer. This keeps the system ephemeral and fire-and-forget.
 
 The existing logging subsystem (`hub.messages`, `broker.messages` from `logging-components.md`) already defines structured attributes. The structured message fields map directly:
 
 ```go
 slog.Info("message dispatched",
     "subsystem", "hub.messages",
-    "message_id", msg.ID,
     "sender", msg.Sender,
     "recipient", msg.Recipient,
     "type", msg.Type,
+    "msg", msg.Msg,
     "urgent", msg.Urgent,
     "broadcasted", msg.Broadcasted,
+    "plain", msg.Plain,
 )
 ```
+
+### 7.2 Cloud Logging Integration
+
+For the cloud/GCP logging integration, message logs should be written to a **dedicated `scion-messages` log** (separate from the general application log). Each log entry must include:
+
+- Standard `agent_id` labels (already present in the logging pipeline)
+- `sender` label using the `<type>:<identifier>` format (e.g., `user:alice`, `agent:backend-dev`)
+- `recipient` label using the same format
+- `type` label for the message type
+- The full structured message as the log payload
+
+This enables filtering and querying message history via Cloud Logging without requiring a dedicated database table.
+
+### 7.3 Local Mode
+
+In local mode (no Hub), messages are not logged beyond the standard application log output. Message history is not available without a Hub.
 
 ---
 
@@ -546,32 +542,27 @@ The webhook channel POSTs the structured message JSON to the configured URL. Thi
 }
 ```
 
-### 8.4 Channel Registration and Configuration
+### 8.4 Channel Configuration via Settings
 
-Channels are registered per-user or per-grove in the Hub:
+Notification channels are configured through the **core/global settings file** rather than dedicated CLI commands or database tables. Channel configuration is defined in the Scion settings schema and read at Hub startup.
 
-```sql
-CREATE TABLE notification_channels (
-    id TEXT PRIMARY KEY,
-    grove_id TEXT,               -- NULL for user-global channels
-    user_id TEXT NOT NULL,
-    channel_type TEXT NOT NULL,  -- "webhook", "slack", "email"
-    config TEXT NOT NULL,        -- JSON ChannelConfig
-    enabled BOOLEAN DEFAULT TRUE,
-    filter_types TEXT,           -- JSON array of message types to forward, NULL = all
-    filter_urgent_only BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMP NOT NULL
-);
+Example settings structure:
+```yaml
+notification_channels:
+  - type: webhook
+    params:
+      url: "https://hooks.example.com/scion"
+      method: "POST"
+    filter_types: ["state-change", "input-needed"]
+    filter_urgent_only: false
+  - type: slack
+    params:
+      webhook_url: "https://hooks.slack.com/services/..."
+      channel: "#scion-notifications"
+      mention_on_urgent: "@here"
 ```
 
-CLI for managing channels:
-```bash
-scion hub channels add --type webhook --url https://hooks.example.com/scion
-scion hub channels add --type slack --webhook-url https://hooks.slack.com/...
-scion hub channels list
-scion hub channels remove <id>
-scion hub channels test <id>   # sends a test notification
-```
+**Secret handling**: Channel secrets (webhook URLs, API tokens) are read from the settings file and held **in memory only** — they are never persisted to a database or written to logs.
 
 ### 8.5 Dispatch Flow with Channels
 
@@ -582,7 +573,7 @@ NotificationDispatcher.storeAndDispatch():
   3. Route by subscriber type:
      a. SubscriberTypeAgent -> DispatchAgentMessage (existing)
      b. SubscriberTypeUser  -> PublishNotification (SSE, existing)
-                            -> ForEach user notification_channels:
+                            -> ForEach configured notification_channels:
                                  channel.Deliver(msg, config)
 ```
 
@@ -598,7 +589,6 @@ Today, message delivery is point-to-point: CLI -> Hub API -> Broker -> tmux. For
 
 - Message queuing and retry
 - Topic-based subscriptions
-- Persistent message history
 - Cross-grove message routing
 - Plugin-based message transformation
 
@@ -661,12 +651,11 @@ scion.grove.<grove-id>.agent.<agent-slug>.status       # status changes
 
 Uses the existing `ChannelEventPublisher` pattern (Go channels with NATS-style subject matching). No external dependencies. Suitable for single-node deployments.
 
-This is essentially a refactor of the current event system to also handle messages, not just status events. The key addition is that messages published to the broker are also persisted to the message log and forwarded to the Hub dispatcher for agent delivery.
+This is essentially a refactor of the current event system to also handle messages, not just status events. The key addition is that messages published to the broker are also logged and forwarded to the Hub dispatcher for agent delivery.
 
 ```go
 type InProcessBroker struct {
-    publisher *ChannelEventPublisher
-    store     MessageStore
+    publisher  *ChannelEventPublisher
     dispatcher AgentDispatcher
 }
 ```
@@ -690,7 +679,15 @@ type RedisBroker struct {
 }
 ```
 
-### 9.6 Broadcast Flow with Broker
+### 9.6 Broker Configuration
+
+The broker adapter is configured at the **Hub level**. Each grove maps to a broker namespace using a convention based on the grove ID:
+
+- **Hub configuration**: Selects the broker adapter type (InProcess, NATS, Redis) and connection parameters.
+- **Grove mapping**: Each grove maps to `scion.grove.<grove-id>.*` topic namespace automatically.
+- **Per-grove enablement**: External broker adapters can be enabled per grove, allowing some groves to use InProcess while others use NATS.
+
+### 9.7 Broadcast Flow with Broker
 
 **Current flow (without broker):**
 ```
@@ -712,7 +709,7 @@ Agent A: scion message --broadcast "whats up?"
 
 The key difference is the CLI makes **one** API call instead of N, and the fan-out logic moves to the broker layer. The Hub subscribes on behalf of agents because agents themselves don't have direct broker connectivity (they're in containers).
 
-### 9.7 Agent-to-Agent Direct Messages
+### 9.8 Agent-to-Agent Direct Messages
 
 For direct agent-to-agent messages, the broker provides optional logging and routing but is not strictly required:
 
@@ -721,12 +718,12 @@ Agent A: scion message agent-b "here are my findings"
   -> CLI sends to Hub API (1 request)
   -> Hub publishes to broker: scion.grove.<id>.agent.agent-b.messages
   -> Hub (subscribed) receives and dispatches to agent-b's broker
-  -> Message logged in message store
+  -> Message logged via structured logging
 ```
 
 For single-node InProcess mode, this adds minimal overhead (one channel send). For multi-node NATS mode, this enables cross-broker routing transparently.
 
-### 9.8 Hub as Subscription Proxy
+### 9.9 Hub as Subscription Proxy
 
 Agents run in containers without direct broker connectivity. The Hub acts as a subscription proxy:
 
@@ -745,9 +742,9 @@ This keeps the agent container interface unchanged (tmux send-keys) while enabli
 | Phase | Change | Backwards Compatible |
 |-------|--------|---------------------|
 | 1 | Add `StructuredMessage` to `MessageRequest`, Hub accepts both | Yes - old `Message` field still works |
-| 2 | CLI defaults to structured, `--plain` flag added | Yes - `--plain` restores old behavior |
+| 2 | CLI defaults to structured, `--plain` flag added | Yes - `--plain` restores raw-text delivery |
 | 3 | Notification dispatcher uses structured messages | Yes - message content is human-readable |
-| 4 | Message storage table added | Yes - optional, no breaking changes |
+| 4 | Structured logging for messages added | Yes - no breaking changes |
 | 5 | Notification channels added | Yes - additive feature |
 | 6 | Broker adapter layer introduced | Yes - InProcess adapter preserves current behavior |
 
@@ -820,27 +817,27 @@ If a new CLI sends a `StructuredMessage` to an old Hub:
 
 ### High Priority
 
-1. **Message size limits**: Should we enforce a max message size? Current tmux send-keys has practical limits. Proposed: 64KB for `msg` field, 10 items for `attachments`.
+1. ~~**Message size limits**~~: **Resolved** — 64KB for `msg` field, 10 items for `attachments`.
 
-2. **Attachment delivery**: The `attachments` field lists relative file paths. Should the system verify these files exist before sending? Should it include file content inline for cross-broker scenarios where the recipient is on a different machine? Or is path-reference sufficient since agents share a git repo?
+2. ~~**Attachment delivery**~~: **Resolved** — Path reference only. Agents share a git repo, so relative paths are sufficient.
 
-3. **Message persistence scope**: Should messages be stored permanently or with TTL? Local mode messages (no Hub) - should they be logged at all, or only in Hub mode?
+3. ~~**Message persistence scope**~~: **Resolved** — Messages are logged via structured logging in Hub mode only. No database persistence. No logging in local mode.
 
-4. **Recipient stripping granularity**: The spec says "recipient field is stripped before delivery." Should we also strip `id` (to save tokens) or keep it for agent-side deduplication?
+4. ~~**Recipient stripping granularity**~~: **Resolved** — Both `recipient` and `id` are stripped before delivery to save tokens.
 
-5. **Notification channel secrets**: Webhook URLs and Slack tokens are secrets. Should they be stored encrypted in the Hub DB, or referenced from an external secret manager?
+5. ~~**Notification channel secrets**~~: **Resolved** — Read from settings file, held in memory only. Never persisted to a database.
 
 ### Medium Priority
 
-6. **Message acknowledgment**: Should agents be able to acknowledge receipt of messages? This would enable delivery confirmation and retry logic. Current system is fire-and-forget.
+6. ~~**Message acknowledgment**~~: **Resolved** — No acknowledgment. System is ephemeral, fire-and-forget.
 
-7. **Reply threading**: Should messages support a `reply_to` field referencing a previous `id`? This would enable conversation threading between agents.
+7. ~~**Reply threading**~~: **Resolved** — No threading. Keep simple.
 
-8. **Rate limiting**: Should there be rate limits on broadcasts? An agent could flood the system with `--broadcast` in a loop.
+8. **Rate limiting**: No rate limit for now. Note for future consideration — an agent could flood the system with `--broadcast` in a loop.
 
-9. **Broker adapter selection**: Should the broker adapter be configurable per-grove or globally? A grove might want NATS while the system default is InProcess.
+9. ~~**Broker adapter selection**~~: **Resolved** — Configured at the Hub level, with a convention for how a grove maps to a broker namespace. External adapters enabled per grove.
 
-10. **Message type extensibility**: Should message types be a closed enum (validated at send time) or open (any string accepted)?
+10. ~~**Message type extensibility**~~: **Resolved** — Closed enum. New types require a schema version bump.
 
 ### Low Priority
 
@@ -856,33 +853,37 @@ If a new CLI sends a `StructuredMessage` to an old Hub:
 
 ### Phase 1: Core Structured Message (Foundation)
 - Define `StructuredMessage` Go struct in a shared package (e.g., `pkg/messages/`)
+- Include `plain` field in the schema
+- Define closed enum for message types with validation
 - Update `MessageRequest` in Hub and Broker to include `StructuredMessage` field
 - Update Hub handler to accept and forward structured messages
 - Preserve backwards compatibility with plain `Message` field
 - Add `--plain` flag to CLI
 - Update CLI to construct `StructuredMessage` by default
-- Update sender resolution logic in CLI
+- Update sender resolution logic in CLI (Hub mode only)
+- Restrict `--all` flag to admin users
 
 ### Phase 2: Delivery and Harness Updates
 - Update `AgentManager.Message()` to format structured messages for tmux delivery
 - Add `FormatMessage` method to `Harness` interface (optional per-harness customization)
-- Strip `recipient` field before delivery
-- Update notification dispatcher to produce `StructuredMessage` instead of plain text
+- Strip `recipient` and `id` fields before delivery
+- Implement plain-mode unwrapping at harness delivery (deliver raw `msg` when `plain: true`)
+- Handle empty messages as plain tmux `Enter` keypress
+- Update notification dispatcher to produce `StructuredMessage` with `agent:<slug>` as sender
 - Update system notification prefix to use structured format
 
-### Phase 3: Storage and Logging
-- Add `messages` table to Hub store
-- Store messages at Hub before dispatch
-- Update delivery status on confirmation
-- Add structured logging attributes for message fields
-- Add CLI commands for message history (`scion hub messages list`)
+### Phase 3: Logging
+- Add structured logging for message dispatch with dedicated `scion-messages` log
+- Include `sender`, `recipient`, and `type` as log labels
+- Include standard `agent_id` labels in all message log entries
+- No database table — structured logs are the message audit trail
 
 ### Phase 4: Notification Channels
 - Define `NotificationChannel` interface
 - Implement webhook channel
-- Add `notification_channels` table
+- Add notification channel configuration to the core settings schema
+- Load channel configs at Hub startup, hold secrets in memory only
 - Wire channel dispatch into `NotificationDispatcher`
-- Add CLI commands for channel management
 - Implement Slack channel adapter
 
 ### Phase 5: Message Broker Adapter Layer
@@ -891,7 +892,7 @@ If a new CLI sends a `StructuredMessage` to an old Hub:
 - Refactor broadcast to use broker publish instead of CLI-side fan-out
 - Add Hub subscription proxy for agent message topics
 - Wire broker into Hub server initialization
-- Add configuration for broker adapter selection
+- Add Hub-level configuration for broker adapter selection with per-grove enablement
 
 ### Phase 6: External Broker Adapters
 - Implement NATS adapter
@@ -904,24 +905,24 @@ If a new CLI sends a `StructuredMessage` to an old Hub:
 ## 14. Key Files Affected
 
 ### CLI Layer
-- `cmd/message.go` - Add `--plain`, `--type`, `--attach` flags; default to structured messages
+- `cmd/message.go` - Add `--plain`, `--attach` flags; remove `--type`; default to structured messages; restrict `--all` to admins
 - `cmd/message_test.go` - Update tests for structured message construction
 
 ### Shared Types
-- `pkg/messages/types.go` (new) - `StructuredMessage` struct, message type constants
-- `pkg/messages/format.go` (new) - Formatting utilities for harness delivery
+- `pkg/messages/types.go` (new) - `StructuredMessage` struct, message type constants (closed enum), validation
+- `pkg/messages/format.go` (new) - Formatting utilities for harness delivery, plain-mode unwrapping
 
 ### Hub
 - `pkg/hub/handlers.go` - Update `MessageRequest`, `handleAgentMessage`
-- `pkg/hub/notifications.go` - Update `formatNotificationMessage` to produce `StructuredMessage`
+- `pkg/hub/notifications.go` - Update `formatNotificationMessage` to produce `StructuredMessage` with `agent:<slug>` sender
 - `pkg/hub/events.go` - Add message-related event types
 
 ### Runtime Broker
 - `pkg/runtimebroker/types.go` - Update `MessageRequest` to include structured message
-- `pkg/runtimebroker/handlers.go` - Update `sendMessage` to handle structured messages
+- `pkg/runtimebroker/handlers.go` - Update `sendMessage` to handle structured messages, plain-mode unwrapping
 
 ### Agent Manager
-- `pkg/agent/manager.go` - Update `Message()` to format structured messages for tmux delivery
+- `pkg/agent/manager.go` - Update `Message()` to format structured messages for tmux delivery; handle empty messages as plain `Enter`
 
 ### Harness
 - `pkg/harness/harness.go` - Add optional `FormatMessage` to interface
@@ -934,10 +935,8 @@ If a new CLI sends a `StructuredMessage` to an old Hub:
 ### Broker Client
 - `pkg/brokerclient/agents.go` - Update `SendMessage` to support structured format
 
-### Store
-- `pkg/store/store.go` - Add `MessageStore` interface
-- `pkg/store/models.go` - Add `Message` model
-- `pkg/store/sqlite/messages.go` (new) - SQLite implementation
+### Logging
+- Hub structured logging configuration - Add dedicated `scion-messages` log with sender/recipient/type labels
 
 ### Web Frontend
 - `web/src/components/shared/notification-tray.ts` - Parse structured message format
@@ -946,9 +945,7 @@ If a new CLI sends a `StructuredMessage` to an old Hub:
 ### Notification Channels (New)
 - `pkg/hub/channels.go` (new) - Channel interface, registry, dispatch
 - `pkg/hub/channels_webhook.go` (new) - Webhook channel implementation
-- `pkg/hub/handlers_channels.go` (new) - Channel management API handlers
-- `pkg/hubclient/channels.go` (new) - Channel management client
-- `cmd/hub_channels.go` (new) - CLI commands for channel management
+- Settings schema update - Add `notification_channels` configuration section
 
 ### Message Broker (New)
 - `pkg/broker/broker.go` (new) - Broker interface
