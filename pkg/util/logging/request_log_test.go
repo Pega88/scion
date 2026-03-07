@@ -75,6 +75,48 @@ func TestInstrumentedResponseWriter_DoubleWriteHeader(t *testing.T) {
 	}
 }
 
+func TestInstrumentedResponseWriter_FlushBeforeWrite(t *testing.T) {
+	rec := httptest.NewRecorder()
+	w := &InstrumentedResponseWriter{ResponseWriter: rec, statusCode: http.StatusOK}
+
+	// Flush before any Write or WriteHeader — should commit headers through the wrapper
+	w.Flush()
+
+	if !w.wroteHeader {
+		t.Error("expected wroteHeader to be true after Flush")
+	}
+	if w.statusCode != http.StatusOK {
+		t.Errorf("expected status 200 after Flush, got %d", w.statusCode)
+	}
+
+	// Subsequent Write should not trigger a superfluous WriteHeader
+	n, err := w.Write([]byte("streamed"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if w.bytesWritten != int64(n) {
+		t.Errorf("expected bytesWritten=%d, got %d", n, w.bytesWritten)
+	}
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected recorded status 200, got %d", rec.Code)
+	}
+}
+
+func TestInstrumentedResponseWriter_WriteHeaderThenFlush(t *testing.T) {
+	rec := httptest.NewRecorder()
+	w := &InstrumentedResponseWriter{ResponseWriter: rec, statusCode: http.StatusOK}
+
+	w.WriteHeader(http.StatusAccepted)
+	w.Flush()
+
+	if w.statusCode != http.StatusAccepted {
+		t.Errorf("expected status 202, got %d", w.statusCode)
+	}
+	if rec.Code != http.StatusAccepted {
+		t.Errorf("expected recorded status 202, got %d", rec.Code)
+	}
+}
+
 func TestRequestMetaContext(t *testing.T) {
 	ctx := context.Background()
 

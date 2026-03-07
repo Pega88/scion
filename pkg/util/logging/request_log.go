@@ -94,6 +94,9 @@ func (w *InstrumentedResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, erro
 
 // Flush implements http.Flusher for streaming support.
 func (w *InstrumentedResponseWriter) Flush() {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
 	if f, ok := w.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
 	}
