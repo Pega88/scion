@@ -79,9 +79,17 @@ func (m *AgentManager) Start(ctx context.Context, opts api.StartOptions) (*api.A
 		ctx = api.ContextWithGitClone(ctx, opts.GitClone)
 	}
 
+	// Build inline config for GetAgent, ensuring --harness-auth is applied
+	// before harness Provision() runs (which reads auth_selectedType to decide
+	// which env vars to inject).
+	var startInlineConfig *api.ScionConfig
+	if opts.HarnessAuth != "" {
+		startInlineConfig = &api.ScionConfig{AuthSelectedType: opts.HarnessAuth}
+	}
+
 	util.Debugf("Start: calling GetAgent name=%s template=%q image=%q harnessConfig=%q grovePath=%q profile=%q",
 		opts.Name, opts.Template, opts.Image, opts.HarnessConfig, opts.GrovePath, opts.Profile)
-	agentDir, agentHome, agentWorkspace, finalScionCfg, err := GetAgent(ctx, opts.Name, opts.Template, opts.Image, opts.HarnessConfig, opts.GrovePath, opts.Profile, "", opts.Branch, opts.Workspace)
+	agentDir, agentHome, agentWorkspace, finalScionCfg, err := GetAgent(ctx, opts.Name, opts.Template, opts.Image, opts.HarnessConfig, opts.GrovePath, opts.Profile, "", opts.Branch, opts.Workspace, startInlineConfig)
 	if err != nil {
 		return nil, err
 	}

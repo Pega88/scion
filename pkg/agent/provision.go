@@ -118,7 +118,17 @@ func (m *AgentManager) Provision(ctx context.Context, opts api.StartOptions) (*a
 	if opts.GitClone != nil {
 		ctx = api.ContextWithGitClone(ctx, opts.GitClone)
 	}
-	agentDir, _, _, cfg, err := GetAgent(ctx, opts.Name, opts.Template, opts.Image, opts.HarnessConfig, opts.GrovePath, opts.Profile, "created", opts.Branch, opts.Workspace, opts.InlineConfig)
+	// Inject harness auth override into inline config so it is applied
+	// before harness Provision() runs (which reads auth_selectedType to
+	// decide which env vars to inject into scion-agent.json).
+	inlineCfg := opts.InlineConfig
+	if opts.HarnessAuth != "" {
+		if inlineCfg == nil {
+			inlineCfg = &api.ScionConfig{}
+		}
+		inlineCfg.AuthSelectedType = opts.HarnessAuth
+	}
+	agentDir, _, _, cfg, err := GetAgent(ctx, opts.Name, opts.Template, opts.Image, opts.HarnessConfig, opts.GrovePath, opts.Profile, "created", opts.Branch, opts.Workspace, inlineCfg)
 	if err == nil {
 		_ = UpdateAgentConfig(opts.Name, opts.GrovePath, "created", m.Runtime.Name(), opts.Profile)
 	}
@@ -126,7 +136,9 @@ func (m *AgentManager) Provision(ctx context.Context, opts api.StartOptions) (*a
 		return cfg, err
 	}
 
-	// Apply late-binding harness auth override
+	// Persist harness auth override to the on-disk config (for sciontool).
+	// The auth type was already applied via inlineConfig above, but we
+	// re-write to ensure the final file reflects the override.
 	if opts.HarnessAuth != "" && cfg != nil {
 		cfg.AuthSelectedType = opts.HarnessAuth
 		cfgData, marshalErr := json.MarshalIndent(cfg, "", "  ")

@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/ptone/scion-agent/pkg/api"
 	"github.com/ptone/scion-agent/pkg/config"
 )
 
@@ -75,5 +76,57 @@ func TestProvisionAgentReloadsConfig(t *testing.T) {
 	}
 	if val != "${GEMINI_API_KEY}" {
 		t.Errorf("expected GEMINI_API_KEY to be '${GEMINI_API_KEY}', got '%s'", val)
+	}
+}
+
+func TestProvisionAgentWithHarnessAuthOverride(t *testing.T) {
+	mockRuntimeForTest(t)
+	// Verify that when --harness-auth vertex-ai is used with the gemini harness,
+	// GEMINI_API_KEY is NOT injected into the env map by harness Provision().
+
+	tmpDir := t.TempDir()
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	originalHome := os.Getenv("HOME")
+	defer os.Setenv("HOME", originalHome)
+	os.Setenv("HOME", tmpDir)
+
+	if err := config.InitMachine(getTestHarnesses()); err != nil {
+		t.Fatalf("InitMachine failed: %v", err)
+	}
+
+	projectDir := filepath.Join(tmpDir, "project")
+	projectScionDir := filepath.Join(projectDir, ".scion")
+	if err := config.InitProject(projectScionDir, getTestHarnesses()); err != nil {
+		t.Fatalf("InitProject failed: %v", err)
+	}
+
+	if err := os.Chdir(projectDir); err != nil {
+		t.Fatal(err)
+	}
+
+	// Provision with vertex-ai override via inline config (simulates --harness-auth vertex-ai)
+	agentName := "vertex-ai-override"
+	inlineCfg := &api.ScionConfig{AuthSelectedType: "vertex-ai"}
+	_, _, cfg, err := ProvisionAgent(context.Background(), agentName, "default", "", "gemini", projectScionDir, "", "", "", "", inlineCfg)
+	if err != nil {
+		t.Fatalf("ProvisionAgent failed: %v", err)
+	}
+
+	if cfg.Env == nil {
+		t.Fatal("expected cfg.Env to be non-nil")
+	}
+
+	// GEMINI_API_KEY should NOT be present — vertex-ai doesn't use it
+	if _, ok := cfg.Env["GEMINI_API_KEY"]; ok {
+		t.Error("GEMINI_API_KEY should not be in env when auth is vertex-ai")
+	}
+
+	// GOOGLE_CLOUD_PROJECT should be present for vertex-ai
+	if _, ok := cfg.Env["GOOGLE_CLOUD_PROJECT"]; !ok {
+		t.Error("expected GOOGLE_CLOUD_PROJECT to be in env for vertex-ai auth")
 	}
 }
