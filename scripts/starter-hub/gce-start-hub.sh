@@ -133,6 +133,7 @@ schema_version: "1"
 default_runtime: kubernetes
 server:
   mode: production
+image_registry: "us-central1-docker.pkg.dev/ptone-misc/public-docker"
 hub:
   endpoint: "https://hub.demo.scion-ai.dev"
 telemetry:
