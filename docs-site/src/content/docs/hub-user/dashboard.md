@@ -27,7 +27,7 @@ View and manage your registered groves.
 ### Agents
 Detailed view for individual agents, featuring a high-density tabbed layout and improved breadcrumb navigation with a dedicated back button.
 - **Advanced Agent Creation**: A comprehensive form for Just-In-Time (JIT) configuration, allowing granular control over models, resource limits (`max_turns`, `max_duration`), and harness settings at creation time.
-- **Status Tab**: Real-time view of agent lifecycle (Starting, Thinking, Waiting, etc.). Includes **stalled agent detection** to flag agents that have stopped responding.
+- **Status Tab**: Real-time view of agent lifecycle (Starting, Thinking, Waiting, etc.). Includes **stalled agent detection** to flag agents that have stopped responding (setting their activity status to `offline`).
 - **Logs Tab**: Streamed logs from the agent container via the integrated Cloud Log Viewer.
 - **Messages Tab**: A dedicated tab for viewing structured messages sent to and from the agent.
 - **Configuration Tab**: Dedicated tab for viewing the applied configuration of the agent, featuring a new telemetry configuration card.

@@ -372,9 +372,10 @@ Scion includes a comprehensive structured messaging pipeline that provides relia
 
 The Hub includes an automated monitoring system to detect "zombie" or stalled agents. This system tracks the heartbeat signals emitted by runtime brokers.
 
-- **Heartbeat Timeout**: If an agent stops responding and fails to emit a heartbeat within the configured `StalledThreshold`, it is automatically transitioned to a `STALLED` state.
+- **Heartbeat Timeout**: If an agent stops responding and fails to emit a heartbeat within the configured `StalledThreshold`, it is automatically transitioned to an `offline` activity status.
+- **Common Causes**: Currently, this may be due to an agent being unable to refresh its auth token, which disconnects it from sending its heartbeat and other updates. These agents can be stopped and restarted to be provisioned with a new auth token. They should be able to refresh this token as long as they can maintain a connection to the Hub.
 - **Notifications**: Stalled events can trigger automated browser push notifications (by default, `stalled` and `error` states are included in the default notification triggers), proactively alerting administrators to health issues.
-- **Visibility**: The Web UI clearly flags stalled agents with specialized status badges, ensuring they are not lost among active workloads.
+- **Visibility**: The Web UI clearly flags offline agents with specialized status badges, ensuring they are not lost among active workloads.
 
 ## Troubleshooting for Admins
 

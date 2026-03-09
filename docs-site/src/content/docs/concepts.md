@@ -65,6 +65,8 @@ Agent state uses a **layered model** with three dimensions:
 
 This separation allows the UI and API consumers to distinguish between infrastructure lifecycle events (provisioning, stopping) and the agent's cognitive state (thinking, waiting for input). Activities like `completed` and `limits_exceeded` are "sticky" — they persist until the agent is explicitly restarted or stopped.
 
+The `offline` activity status occurs when an agent heartbeat has not been heard from for some time. Currently, this may be due to an agent being unable to refresh its auth token, which disconnects it from sending its heartbeat and other updates. These agents can be stopped and restarted to be provisioned with a new auth token. They should be able to refresh this token as long as they can maintain a connection to the Hub.
+
 ## Detailed Architecture
 
 ### A full approach to sub-agents
