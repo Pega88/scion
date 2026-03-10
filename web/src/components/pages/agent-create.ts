@@ -70,6 +70,9 @@ export class ScionPageAgentCreate extends LitElement {
   private brokerId = '';
 
   @state()
+  private profile = '';
+
+  @state()
   private task = '';
 
   @state()
@@ -83,6 +86,13 @@ export class ScionPageAgentCreate extends LitElement {
 
   /** Whether the groveId was explicitly passed via URL query param (user navigated from grove page) */
   private groveFromUrl = false;
+
+  /** Profiles available on the currently selected broker */
+  private get selectedBrokerProfiles(): import('../../shared/types.js').BrokerProfile[] {
+    if (!this.brokerId) return [];
+    const broker = this.brokers.find((b) => b.id === this.brokerId);
+    return broker?.profiles?.filter((p) => p.available) ?? [];
+  }
 
   static override styles = css`
     :host {
@@ -406,6 +416,9 @@ export class ScionPageAgentCreate extends LitElement {
       if (this.brokerId) {
         body.runtimeBrokerId = this.brokerId;
       }
+      if (this.profile) {
+        body.profile = this.profile;
+      }
       if (this.task.trim()) {
         body.task = this.task.trim();
       }
@@ -512,6 +525,9 @@ export class ScionPageAgentCreate extends LitElement {
       if (this.brokerId) {
         body.runtimeBrokerId = this.brokerId;
       }
+      if (this.profile) {
+        body.profile = this.profile;
+      }
       if (this.task.trim()) {
         body.task = this.task.trim();
       }
@@ -569,6 +585,7 @@ export class ScionPageAgentCreate extends LitElement {
       );
       if (defaultBroker) {
         this.brokerId = defaultBroker.id;
+        this.autoSelectProfile();
         return;
       }
     }
@@ -578,6 +595,27 @@ export class ScionPageAgentCreate extends LitElement {
       this.brokerId = onlineBroker.id;
     } else if (this.brokers.length > 0) {
       this.brokerId = this.brokers[0].id;
+    }
+    this.autoSelectProfile();
+  }
+
+  /**
+   * Handle broker selection change: reset and auto-select profile.
+   */
+  private onBrokerChange(): void {
+    this.autoSelectProfile();
+  }
+
+  /**
+   * Auto-select the profile for the current broker.
+   * If only one available profile exists, select it; otherwise clear selection.
+   */
+  private autoSelectProfile(): void {
+    const profiles = this.selectedBrokerProfiles;
+    if (profiles.length === 1) {
+      this.profile = profiles[0].name;
+    } else {
+      this.profile = '';
     }
   }
 
@@ -601,6 +639,7 @@ export class ScionPageAgentCreate extends LitElement {
       if (agent.harnessAuth) this.harnessAuth = agent.harnessAuth;
       if (agent.template) this.templateId = agent.template;
       if (agent.runtimeBrokerId) this.brokerId = agent.runtimeBrokerId;
+      if (agent.appliedConfig?.profile) this.profile = agent.appliedConfig.profile;
     } catch {
       // If fetch fails, clear editing state
       this.editingAgentId = null;
@@ -767,6 +806,7 @@ export class ScionPageAgentCreate extends LitElement {
               .value=${this.brokerId}
               @sl-change=${(e: Event) => {
                 this.brokerId = (e.target as HTMLElement & { value: string }).value;
+                this.onBrokerChange();
               }}
             >
               ${this.brokers.map(
@@ -778,6 +818,28 @@ export class ScionPageAgentCreate extends LitElement {
             </sl-select>
             <div class="hint">The compute node that will run this agent.</div>
           </div>
+
+          ${this.selectedBrokerProfiles.length > 0
+            ? html`
+                <div class="form-field">
+                  <label for="profile">Runtime Profile</label>
+                  <sl-select
+                    id="profile"
+                    placeholder="Select a profile..."
+                    .value=${this.profile}
+                    @sl-change=${(e: Event) => {
+                      this.profile = (e.target as HTMLElement & { value: string }).value;
+                    }}
+                  >
+                    ${this.selectedBrokerProfiles.map(
+                      (p) =>
+                        html`<sl-option value=${p.name}>${p.name} (${p.type})</sl-option>`
+                    )}
+                  </sl-select>
+                  <div class="hint">The runtime profile on the selected broker.</div>
+                </div>
+              `
+            : ''}
 
           <div class="form-field">
             <label for="task">Initial Task</label>
