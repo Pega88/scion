@@ -60,6 +60,12 @@ type HubConnection struct {
 	// internal database heartbeat loop handles status updates directly.
 	IsColocated bool
 
+	// TemplatesDir is the local filesystem path to the templates directory
+	// (e.g., ~/.scion/templates). When set on a co-located connection, the
+	// broker resolves templates directly from this directory instead of
+	// going through the Hub API → storage → cache hydration round-trip.
+	TemplatesDir string
+
 	Status ConnectionStatus
 	mu     sync.RWMutex
 }

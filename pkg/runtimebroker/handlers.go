@@ -617,9 +617,9 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Hydrate template if Hub mode is enabled and template info is provided
-	hydrator := s.resolveHydrator(r)
-	if hydrator != nil && req.Config != nil {
-		templatePath, err := s.hydrateTemplate(ctx, req.Config, hydrator)
+	hubConn := s.resolveHubConnection(r)
+	if hubConn != nil && req.Config != nil {
+		templatePath, err := s.hydrateTemplate(ctx, req.Config, hubConn)
 		if err != nil {
 			markAttemptFailed(http.StatusInternalServerError, "failed to hydrate template")
 			// Check if it's a Hub connectivity error
@@ -825,10 +825,28 @@ func (s *Server) createAgent(w http.ResponseWriter, r *http.Request) {
 
 // hydrateTemplate fetches and caches a template from the Hub if template info is provided.
 // Returns the local template path, or empty string if no Hub template was specified.
-func (s *Server) hydrateTemplate(ctx context.Context, cfg *CreateAgentConfig, hydrator *templatecache.Hydrator) (string, error) {
+// For co-located connections with a TemplatesDir, it resolves the template directly
+// from the local filesystem, bypassing the Hub API round-trip entirely.
+func (s *Server) hydrateTemplate(ctx context.Context, cfg *CreateAgentConfig, conn *HubConnection) (string, error) {
 	// Check if we have template info from Hub
 	if cfg.TemplateID == "" && cfg.TemplateHash == "" {
 		// No Hub template info provided, use local template handling
+		return "", nil
+	}
+
+	// Co-located shortcut: resolve directly from the local templates directory.
+	// This means edits to ~/.scion/templates/<name> are picked up immediately
+	// without needing to re-sync through Hub storage and cache.
+	if conn.IsColocated && conn.TemplatesDir != "" && cfg.Template != "" {
+		localPath := filepath.Join(conn.TemplatesDir, cfg.Template)
+		if info, err := os.Stat(localPath); err == nil && info.IsDir() {
+			return localPath, nil
+		}
+		// Fall through to hydration if local path doesn't exist
+	}
+
+	hydrator := conn.Hydrator
+	if hydrator == nil {
 		return "", nil
 	}
 
@@ -1990,9 +2008,9 @@ func (s *Server) finalizeEnv(w http.ResponseWriter, r *http.Request, id string) 
 	}
 
 	// Hydrate template if needed
-	hydrator := s.resolveHydrator(r)
-	if hydrator != nil && origReq.Config != nil {
-		templatePath, err := s.hydrateTemplate(ctx, origReq.Config, hydrator)
+	hubConn := s.resolveHubConnection(r)
+	if hubConn != nil && origReq.Config != nil {
+		templatePath, err := s.hydrateTemplate(ctx, origReq.Config, hubConn)
 		if err != nil {
 			TemplateError(w, "Failed to hydrate template: "+err.Error())
 			return

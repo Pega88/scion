@@ -27,24 +27,15 @@ import (
 	"github.com/GoogleCloudPlatform/scion/pkg/transfer"
 )
 
-// BootstrapTemplatesFromDir imports local templates from a directory into
-// the Hub's database and storage. It is a one-time operation: if any
-// templates already exist in the database, it returns immediately.
+// BootstrapTemplatesFromDir imports or updates local templates from a directory
+// into the Hub's database and storage. On first run it imports all templates;
+// on subsequent runs it detects changed templates (by content hash) and
+// re-uploads only those that differ from the database version.
 func (s *Server) BootstrapTemplatesFromDir(ctx context.Context, templatesDir string) error {
 	// Check if the directory exists
 	info, err := os.Stat(templatesDir)
 	if err != nil || !info.IsDir() {
 		s.templateLog.Debug("template bootstrap: directory not found, skipping", "dir", templatesDir)
-		return nil
-	}
-
-	// Check if the DB already has templates — if so, skip bootstrap
-	result, err := s.store.ListTemplates(ctx, store.TemplateFilter{}, store.ListOptions{Limit: 1})
-	if err != nil {
-		return err
-	}
-	if result.TotalCount > 0 {
-		s.templateLog.Debug("template bootstrap: templates already exist in database, skipping")
 		return nil
 	}
 
@@ -61,7 +52,7 @@ func (s *Server) BootstrapTemplatesFromDir(ctx context.Context, templatesDir str
 		return err
 	}
 
-	imported := 0
+	imported, updated := 0, 0
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -69,20 +60,121 @@ func (s *Server) BootstrapTemplatesFromDir(ctx context.Context, templatesDir str
 
 		name := entry.Name()
 		templatePath := filepath.Join(templatesDir, name)
+		slug := api.Slugify(name)
 
-		if err := s.bootstrapSingleTemplate(ctx, name, templatePath); err != nil {
-			s.templateLog.Warn("template bootstrap: failed to import template, skipping",
+		// Check if this template already exists in the database
+		existing, err := s.store.GetTemplateBySlug(ctx, slug, string(store.TemplateScopeGlobal), "")
+		if err != nil && err != store.ErrNotFound {
+			s.templateLog.Warn("template bootstrap: failed to look up template, skipping",
 				"template", name, "error", err)
 			continue
 		}
-		imported++
+
+		if existing == nil {
+			// New template — import it
+			if err := s.bootstrapSingleTemplate(ctx, name, templatePath); err != nil {
+				s.templateLog.Warn("template bootstrap: failed to import template, skipping",
+					"template", name, "error", err)
+				continue
+			}
+			imported++
+		} else {
+			// Existing template — check if local files have changed
+			changed, err := s.syncExistingTemplate(ctx, existing, templatePath)
+			if err != nil {
+				s.templateLog.Warn("template bootstrap: failed to sync template, skipping",
+					"template", name, "error", err)
+				continue
+			}
+			if changed {
+				updated++
+			}
+		}
 	}
 
-	if imported > 0 {
-		s.templateLog.Info("template bootstrap: imported local templates", "count", imported)
+	if imported > 0 || updated > 0 {
+		s.templateLog.Info("template bootstrap: sync complete",
+			"imported", imported, "updated", updated)
 	}
 
 	return nil
+}
+
+// syncExistingTemplate checks if a local template directory has changed
+// compared to what is stored in the Hub database. If so, it re-uploads
+// the files and updates the database record. Returns true if an update occurred.
+func (s *Server) syncExistingTemplate(ctx context.Context, existing *store.Template, templatePath string) (bool, error) {
+	stor := s.GetStorage()
+
+	// Collect current files from disk
+	files, err := transfer.CollectFiles(templatePath, nil)
+	if err != nil {
+		return false, err
+	}
+
+	// Build the file list and compute the new content hash
+	var templateFiles []store.TemplateFile
+	for _, fi := range files {
+		templateFiles = append(templateFiles, store.TemplateFile{
+			Path: fi.Path,
+			Size: fi.Size,
+			Hash: fi.Hash,
+			Mode: fi.Mode,
+		})
+	}
+	newHash := computeContentHash(templateFiles)
+
+	// If content hash matches, nothing to do
+	if newHash == existing.ContentHash {
+		return false, nil
+	}
+
+	s.templateLog.Info("template bootstrap: local template changed, re-syncing",
+		"template", existing.Name, "oldHash", existing.ContentHash, "newHash", newHash)
+
+	// Re-upload all files to storage
+	storagePath := existing.StoragePath
+	if storagePath == "" {
+		storagePath = storage.TemplateStoragePath(existing.Scope, "", existing.Slug)
+	}
+
+	var uploadedFiles []store.TemplateFile
+	for _, fi := range files {
+		objectPath := storagePath + "/" + fi.Path
+
+		f, err := os.Open(fi.FullPath)
+		if err != nil {
+			s.templateLog.Warn("template bootstrap: failed to open file, skipping",
+				"file", fi.Path, "error", err)
+			continue
+		}
+
+		_, err = stor.Upload(ctx, objectPath, f, storage.UploadOptions{})
+		f.Close()
+		if err != nil {
+			s.templateLog.Warn("template bootstrap: failed to upload file, skipping",
+				"file", fi.Path, "error", err)
+			continue
+		}
+
+		uploadedFiles = append(uploadedFiles, store.TemplateFile{
+			Path: fi.Path,
+			Size: fi.Size,
+			Hash: fi.Hash,
+			Mode: fi.Mode,
+		})
+	}
+
+	// Update the database record with new files and hash
+	existing.Files = uploadedFiles
+	existing.ContentHash = newHash
+	existing.Harness = detectHarnessFromConfig(templatePath, existing.Name)
+
+	if err := s.store.UpdateTemplate(ctx, existing); err != nil {
+		return false, err
+	}
+
+	return true, nil
 }
 
 // bootstrapSingleTemplate imports one local template directory into the

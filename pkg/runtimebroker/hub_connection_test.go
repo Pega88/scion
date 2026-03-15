@@ -1593,3 +1593,98 @@ func TestHandleHubConnections_ConnectionStatus(t *testing.T) {
 		t.Errorf("expected status 'connected', got %q", resp.Connections[0].Status)
 	}
 }
+
+func TestHydrateTemplate_ColocatedPassthrough(t *testing.T) {
+	// Create a temporary templates directory with a template
+	templatesDir := t.TempDir()
+	templateDir := filepath.Join(templatesDir, "my-template")
+	if err := os.MkdirAll(templateDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(templateDir, "file.txt"), []byte("content"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := newTestServer()
+
+	// Create a co-located connection with TemplatesDir set
+	conn := &HubConnection{
+		Name:         "local",
+		IsColocated:  true,
+		TemplatesDir: templatesDir,
+	}
+
+	cfg := &CreateAgentConfig{
+		Template:   "my-template",
+		TemplateID: "some-uuid",
+	}
+
+	// Co-located passthrough should resolve directly to the local directory
+	path, err := srv.hydrateTemplate(context.Background(), cfg, conn)
+	if err != nil {
+		t.Fatalf("hydrateTemplate failed: %v", err)
+	}
+	if path != templateDir {
+		t.Errorf("expected path %q, got %q", templateDir, path)
+	}
+}
+
+func TestHydrateTemplate_ColocatedFallsBackWhenMissing(t *testing.T) {
+	templatesDir := t.TempDir()
+	// Don't create the template directory — it doesn't exist locally
+
+	srv := newTestServer()
+
+	conn := &HubConnection{
+		Name:         "local",
+		IsColocated:  true,
+		TemplatesDir: templatesDir,
+		// No Hydrator set — should return empty string
+	}
+
+	cfg := &CreateAgentConfig{
+		Template:   "nonexistent-template",
+		TemplateID: "some-uuid",
+	}
+
+	// Should fall through to hydrator (which is nil), returning empty string
+	path, err := srv.hydrateTemplate(context.Background(), cfg, conn)
+	if err != nil {
+		t.Fatalf("hydrateTemplate failed: %v", err)
+	}
+	if path != "" {
+		t.Errorf("expected empty path for missing local template, got %q", path)
+	}
+}
+
+func TestHydrateTemplate_NonColocatedSkipsPassthrough(t *testing.T) {
+	// Create a templates directory with a template
+	templatesDir := t.TempDir()
+	templateDir := filepath.Join(templatesDir, "my-template")
+	if err := os.MkdirAll(templateDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := newTestServer()
+
+	// Non-colocated connection — should NOT use passthrough even with TemplatesDir set
+	conn := &HubConnection{
+		Name:         "remote",
+		IsColocated:  false,
+		TemplatesDir: templatesDir,
+		// No Hydrator — should return empty
+	}
+
+	cfg := &CreateAgentConfig{
+		Template:   "my-template",
+		TemplateID: "some-uuid",
+	}
+
+	path, err := srv.hydrateTemplate(context.Background(), cfg, conn)
+	if err != nil {
+		t.Fatalf("hydrateTemplate failed: %v", err)
+	}
+	if path != "" {
+		t.Errorf("expected empty path for non-colocated connection, got %q", path)
+	}
+}

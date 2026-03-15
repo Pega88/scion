@@ -320,6 +320,14 @@ func (s *Server) initHubIntegration() error {
 			// Mark as co-located so heartbeat is handled by the internal DB loop
 			// instead of the HTTP heartbeat service.
 			conn.IsColocated = true
+
+			// Set templates dir for direct filesystem resolution, bypassing
+			// the Hub API → storage → cache hydration round-trip.
+			homeDir, homeErr := os.UserHomeDir()
+			if homeErr == nil {
+				conn.TemplatesDir = filepath.Join(homeDir, ".scion", "templates")
+			}
+
 			s.hubMu.Lock()
 			s.hubConnections[creds.Name] = conn
 			s.hubMu.Unlock()
@@ -1029,22 +1037,32 @@ func (s *Server) isGlobalGrove(groveID, grovePath string) bool {
 // resolveHydrator resolves the hydrator for a request, routing to the correct
 // hub connection based on the X-Scion-Hub-Connection header.
 func (s *Server) resolveHydrator(r *http.Request) *templatecache.Hydrator {
+	conn := s.resolveHubConnection(r)
+	if conn != nil {
+		return conn.Hydrator
+	}
+	return nil
+}
+
+// resolveHubConnection resolves the hub connection for a request, routing to
+// the correct connection based on the X-Scion-Hub-Connection header.
+func (s *Server) resolveHubConnection(r *http.Request) *HubConnection {
 	connName := r.Header.Get("X-Scion-Hub-Connection")
 	if connName != "" {
 		s.hubMu.RLock()
 		conn, ok := s.hubConnections[connName]
 		s.hubMu.RUnlock()
 		if ok && conn.Hydrator != nil {
-			return conn.Hydrator
+			return conn
 		}
 	}
 
-	// Fallback: return first available hydrator
+	// Fallback: return first available connection with a hydrator
 	s.hubMu.RLock()
 	defer s.hubMu.RUnlock()
 	for _, conn := range s.hubConnections {
 		if conn.Hydrator != nil {
-			return conn.Hydrator
+			return conn
 		}
 	}
 	return nil

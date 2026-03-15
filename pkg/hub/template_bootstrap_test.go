@@ -116,7 +116,7 @@ func TestBootstrapTemplatesFromDir_ImportsTemplates(t *testing.T) {
 	}
 }
 
-func TestBootstrapTemplatesFromDir_NoopWhenTemplatesExist(t *testing.T) {
+func TestBootstrapTemplatesFromDir_ImportsNewAlongsideExisting(t *testing.T) {
 	srv, s, stor := testTemplateBootstrapServer(t)
 	ctx := context.Background()
 
@@ -140,21 +140,96 @@ func TestBootstrapTemplatesFromDir_NoopWhenTemplatesExist(t *testing.T) {
 		t.Fatalf("bootstrap failed: %v", err)
 	}
 
-	// Verify no new templates were created
+	// Verify the new template was imported alongside the existing one
+	result, err := s.ListTemplates(ctx, store.TemplateFilter{}, store.ListOptions{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.TotalCount != 2 {
+		t.Fatalf("expected 2 templates (existing + new), got %d", result.TotalCount)
+	}
+
+	// Verify the new template files were uploaded
+	if len(stor.objects) != 1 {
+		t.Errorf("expected 1 object in storage (new template file), got %d", len(stor.objects))
+	}
+}
+
+func TestBootstrapTemplatesFromDir_SyncsChangedTemplate(t *testing.T) {
+	srv, s, stor := testTemplateBootstrapServer(t)
+	ctx := context.Background()
+
+	// First bootstrap
+	templatesDir := makeTemplateDir(t, "my-template", map[string]string{
+		"file.txt": "original content",
+	})
+
+	if err := srv.BootstrapTemplatesFromDir(ctx, templatesDir); err != nil {
+		t.Fatalf("first bootstrap failed: %v", err)
+	}
+
+	// Verify initial state
 	result, err := s.ListTemplates(ctx, store.TemplateFilter{}, store.ListOptions{Limit: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if result.TotalCount != 1 {
-		t.Fatalf("expected 1 template (existing only), got %d", result.TotalCount)
+		t.Fatalf("expected 1 template, got %d", result.TotalCount)
 	}
-	if result.Items[0].Name != "existing" {
-		t.Errorf("expected existing template, got %q", result.Items[0].Name)
+	originalHash := result.Items[0].ContentHash
+	_ = stor // storage is used during upload
+
+	// Modify the template file on disk
+	if err := os.WriteFile(filepath.Join(templatesDir, "my-template", "file.txt"), []byte("updated content"), 0644); err != nil {
+		t.Fatal(err)
 	}
 
-	// Verify nothing was uploaded to storage
-	if len(stor.objects) != 0 {
-		t.Errorf("expected 0 objects in storage, got %d", len(stor.objects))
+	// Second bootstrap should detect the change and update
+	if err := srv.BootstrapTemplatesFromDir(ctx, templatesDir); err != nil {
+		t.Fatalf("second bootstrap failed: %v", err)
+	}
+
+	// Verify the template was updated with a new content hash
+	result, err = s.ListTemplates(ctx, store.TemplateFilter{}, store.ListOptions{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.TotalCount != 1 {
+		t.Fatalf("expected 1 template, got %d", result.TotalCount)
+	}
+	if result.Items[0].ContentHash == originalHash {
+		t.Error("expected content hash to change after file update")
+	}
+}
+
+func TestBootstrapTemplatesFromDir_SkipsUnchangedTemplate(t *testing.T) {
+	srv, s, stor := testTemplateBootstrapServer(t)
+	ctx := context.Background()
+
+	templatesDir := makeTemplateDir(t, "my-template", map[string]string{
+		"file.txt": "stable content",
+	})
+
+	if err := srv.BootstrapTemplatesFromDir(ctx, templatesDir); err != nil {
+		t.Fatalf("first bootstrap failed: %v", err)
+	}
+
+	result, _ := s.ListTemplates(ctx, store.TemplateFilter{}, store.ListOptions{Limit: 10})
+	originalHash := result.Items[0].ContentHash
+	uploadCountAfterFirst := len(stor.objects)
+
+	// Second bootstrap with no changes
+	if err := srv.BootstrapTemplatesFromDir(ctx, templatesDir); err != nil {
+		t.Fatalf("second bootstrap failed: %v", err)
+	}
+
+	result, _ = s.ListTemplates(ctx, store.TemplateFilter{}, store.ListOptions{Limit: 10})
+	if result.Items[0].ContentHash != originalHash {
+		t.Error("content hash should not change when files are unchanged")
+	}
+	if len(stor.objects) != uploadCountAfterFirst {
+		t.Errorf("expected no new uploads, storage objects went from %d to %d",
+			uploadCountAfterFirst, len(stor.objects))
 	}
 }
 
