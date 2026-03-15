@@ -287,18 +287,26 @@ func EnsureHubReady(grovePath string, opts EnsureHubReadyOptions) (*HubContext, 
 		brokerID = settings.Hub.BrokerID
 	}
 
+	// Prefer hub.groveId (explicit link to a hub grove) over grove_id
+	// (deterministic local identity). For hub API calls, we need the ID
+	// the hub knows the grove by.
+	effectiveGroveID := groveID
+	if hgid := settings.GetHubGroveID(); hgid != "" {
+		effectiveGroveID = hgid
+	}
+
 	hubCtx := &HubContext{
 		Client:    client,
 		Endpoint:  endpoint,
 		Settings:  settings,
-		GroveID:   groveID,
+		GroveID:   effectiveGroveID,
 		BrokerID:  brokerID,
 		GrovePath: resolvedPath,
 		IsGlobal:  isGlobal,
 	}
 
-	debugf("HubContext created: endpoint=%s, groveID=%s, brokerID=%s, grovePath=%s, isGlobal=%v",
-		endpoint, groveID, brokerID, resolvedPath, isGlobal)
+	debugf("HubContext created: endpoint=%s, groveID=%s (local=%s), brokerID=%s, grovePath=%s, isGlobal=%v",
+		endpoint, effectiveGroveID, groveID, brokerID, resolvedPath, isGlobal)
 
 	// Inside a hub-connected container, skip grove registration, provider path,
 	// and sync checks — the container should only query the Hub API, not manage
@@ -356,20 +364,17 @@ func EnsureHubReady(grovePath string, opts EnsureHubReadyOptions) (*HubContext, 
 					case GroveChoiceCancel:
 						return nil, fmt.Errorf("registration cancelled")
 					case GroveChoiceLink:
-						// Update local grove_id to the selected grove
-						if err := config.UpdateSetting(resolvedPath, "grove_id", selectedID, isGlobal); err != nil {
-							return nil, fmt.Errorf("failed to update local grove_id: %w", err)
+						// Store the hub grove ID separately — don't overwrite
+						// the deterministic local grove_id.
+						if err := config.UpdateSetting(resolvedPath, "hub.groveId", selectedID, isGlobal); err != nil {
+							return nil, fmt.Errorf("failed to save hub grove ID: %w", err)
 						}
 						hubCtx.GroveID = selectedID
-						debugf("Updated local grove_id to: %s", selectedID)
+						debugf("Stored hub.groveId: %s", selectedID)
 					case GroveChoiceRegisterNew:
-						// Generate a new grove ID to avoid linking to existing grove
-						newID := config.GenerateGroveIDForDir(filepath.Dir(resolvedPath))
-						if err := config.UpdateSetting(resolvedPath, "grove_id", newID, isGlobal); err != nil {
-							return nil, fmt.Errorf("failed to update local grove_id: %w", err)
-						}
-						hubCtx.GroveID = newID
-						debugf("Generated new grove_id: %s", newID)
+						// Register as new grove with the existing local grove_id.
+						// The hub will assign its own ID if needed.
+						debugf("Registering new grove with existing grove_id: %s", hubCtx.GroveID)
 					}
 				}
 			} else {
@@ -386,13 +391,18 @@ func EnsureHubReady(grovePath string, opts EnsureHubReadyOptions) (*HubContext, 
 		if err := registerGrove(context.Background(), hubCtx, groveName, isGlobal); err != nil {
 			return nil, wrapHubError(fmt.Errorf("failed to register grove: %w", err))
 		}
-		// Reload settings to get updated broker ID and grove_id
+		// Reload settings to get updated broker ID and hub.groveId
 		settings, err = config.LoadSettings(resolvedPath)
 		if err != nil {
 			return nil, fmt.Errorf("failed to reload settings: %w", err)
 		}
 		hubCtx.Settings = settings
-		hubCtx.GroveID = settings.GroveID
+		// Prefer hub.groveId (explicit link) over grove_id (deterministic local ID)
+		if hgid := settings.GetHubGroveID(); hgid != "" {
+			hubCtx.GroveID = hgid
+		} else {
+			hubCtx.GroveID = settings.GroveID
+		}
 		if settings.Hub != nil {
 			hubCtx.BrokerID = settings.Hub.BrokerID
 		}
@@ -1241,13 +1251,15 @@ func registerGrove(ctx context.Context, hubCtx *HubContext, groveName string, is
 		fmt.Printf("Created new grove: %s (ID: %s)\n", resp.Grove.Name, resp.Grove.ID)
 	} else {
 		fmt.Printf("Linked to existing grove: %s (ID: %s)\n", resp.Grove.Name, resp.Grove.ID)
-		// Update local grove_id to match the hub grove's ID
-		if resp.Grove.ID != hubCtx.GroveID {
-			if err := config.UpdateSetting(hubCtx.GrovePath, "grove_id", resp.Grove.ID, isGlobal); err != nil {
-				fmt.Printf("Warning: failed to update local grove_id: %v\n", err)
-			} else {
-				hubCtx.GroveID = resp.Grove.ID
-			}
+	}
+	// Store the hub grove ID separately if it differs from the local grove_id.
+	// Don't overwrite grove_id — for git groves it's a deterministic UUID v5
+	// and changing it shifts the external config directory, orphaning settings.
+	if resp.Grove.ID != hubCtx.GroveID {
+		if err := config.UpdateSetting(hubCtx.GrovePath, "hub.groveId", resp.Grove.ID, isGlobal); err != nil {
+			fmt.Printf("Warning: failed to save hub grove ID: %v\n", err)
+		} else {
+			hubCtx.GroveID = resp.Grove.ID
 		}
 	}
 	if resp.Broker != nil {

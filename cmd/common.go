@@ -269,9 +269,14 @@ func GetGroveID(hubCtx *HubContext) (string, error) {
 		return hubCtx.GroveID, nil
 	}
 
-	// Check if there's a local grove_id in settings
-	if hubCtx.Settings != nil && hubCtx.Settings.GroveID != "" {
-		return hubCtx.Settings.GroveID, nil
+	// Check if there's a hub grove ID or local grove_id in settings
+	if hubCtx.Settings != nil {
+		if hgid := hubCtx.Settings.GetHubGroveID(); hgid != "" {
+			return hgid, nil
+		}
+		if hubCtx.Settings.GroveID != "" {
+			return hubCtx.Settings.GroveID, nil
+		}
 	}
 
 	// Fall back to git remote lookup

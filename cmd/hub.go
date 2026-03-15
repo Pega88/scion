@@ -687,8 +687,15 @@ func printGroveContext(client hubclient.Client, grovePath string, isGlobal bool,
 
 	var linkedGrove *hubclient.Grove
 
-	// First try to find by grove_id if we have one
-	if settings.GroveID != "" {
+	// First try hub.groveId (explicit link), then fall back to grove_id
+	hubGroveID := settings.GetHubGroveID()
+	if hubGroveID != "" {
+		grove, err := client.Groves().Get(ctx, hubGroveID)
+		if err == nil {
+			linkedGrove = grove
+		}
+	}
+	if linkedGrove == nil && settings.GroveID != "" {
 		grove, err := client.Groves().Get(ctx, settings.GroveID)
 		if err == nil {
 			linkedGrove = grove
@@ -799,8 +806,15 @@ func getGroveContextJSON(client hubclient.Client, grovePath string, isGlobal boo
 
 	var linkedGrove *hubclient.Grove
 
-	// First try to find by grove_id if we have one
-	if settings.GroveID != "" {
+	// First try hub.groveId (explicit link), then fall back to grove_id
+	hubGroveID := settings.GetHubGroveID()
+	if hubGroveID != "" {
+		grove, err := client.Groves().Get(ctx, hubGroveID)
+		if err == nil {
+			linkedGrove = grove
+		}
+	}
+	if linkedGrove == nil && settings.GroveID != "" {
 		grove, err := client.Groves().Get(ctx, settings.GroveID)
 		if err == nil {
 			linkedGrove = grove
@@ -1852,7 +1866,12 @@ func runHubLink(cmd *cobra.Command, args []string) error {
 	}
 
 	// Check if grove already exists on Hub
-	hubGrove, err := getLinkedGrove(ctx, client, groveID)
+	// Prefer hub.groveId (explicit link) over grove_id (deterministic local ID)
+	hubLookupID := settings.GetHubGroveID()
+	if hubLookupID == "" {
+		hubLookupID = groveID
+	}
+	hubGrove, err := getLinkedGrove(ctx, client, hubLookupID)
 	if err != nil {
 		util.Debugf("Error checking grove link status: %v", err)
 	}
@@ -1889,41 +1908,47 @@ func runHubLink(cmd *cobra.Command, args []string) error {
 			case hubsync.GroveChoiceCancel:
 				return fmt.Errorf("linking cancelled")
 			case hubsync.GroveChoiceLink:
-				// Update local grove_id to the selected grove
-				if err := config.UpdateSetting(resolvedPath, "grove_id", selectedID, isGlobal); err != nil {
-					return fmt.Errorf("failed to update local grove_id: %w", err)
+				// Store the hub grove ID separately — don't overwrite the
+				// deterministic local grove_id (which drives config-dir paths).
+				if err := config.UpdateSetting(resolvedPath, "hub.groveId", selectedID, isGlobal); err != nil {
+					return fmt.Errorf("failed to save hub grove ID: %w", err)
 				}
-				// Also update the grove-id marker file for split-storage groves
-				if !isGlobal {
-					if err := config.WriteGroveID(resolvedPath, selectedID); err != nil {
-						util.Debugf("Failed to update grove-id file: %v", err)
-					}
-				}
-				groveID = selectedID
-				fmt.Printf("Linked to existing grove (ID: %s)\n", groveID)
+				hubLookupID = selectedID
+				fmt.Printf("Linked to existing grove (ID: %s)\n", selectedID)
 			case hubsync.GroveChoiceRegisterNew:
-				// Generate a new grove ID
-				groveID = config.GenerateGroveIDForDir(filepath.Dir(resolvedPath))
-				if err := config.UpdateSetting(resolvedPath, "grove_id", groveID, isGlobal); err != nil {
-					return fmt.Errorf("failed to update local grove_id: %w", err)
-				}
-				// Also update the grove-id marker file for split-storage groves
-				if !isGlobal {
-					if err := config.WriteGroveID(resolvedPath, groveID); err != nil {
-						util.Debugf("Failed to update grove-id file: %v", err)
-					}
-				}
-				// Register as new grove
-				if err := registerGroveOnHub(ctx, client, groveID, groveName, resolvedPath, isGlobal); err != nil {
+				// Register as a new grove on the Hub using the local grove_id.
+				hubGroveID, err := registerGroveOnHub(ctx, client, groveID, groveName, resolvedPath, isGlobal)
+				if err != nil {
 					return err
 				}
+				// Store the hub grove ID if it differs from the local one
+				if hubGroveID != "" && hubGroveID != groveID {
+					if err := config.UpdateSetting(resolvedPath, "hub.groveId", hubGroveID, isGlobal); err != nil {
+						return fmt.Errorf("failed to save hub grove ID: %w", err)
+					}
+				}
+				hubLookupID = hubGroveID
 			}
 		} else {
 			// No matching groves - create new one
-			if err := registerGroveOnHub(ctx, client, groveID, groveName, resolvedPath, isGlobal); err != nil {
+			hubGroveID, err := registerGroveOnHub(ctx, client, groveID, groveName, resolvedPath, isGlobal)
+			if err != nil {
 				return err
 			}
+			// Store the hub grove ID if it differs from the local one
+			if hubGroveID != "" && hubGroveID != groveID {
+				if err := config.UpdateSetting(resolvedPath, "hub.groveId", hubGroveID, isGlobal); err != nil {
+					return fmt.Errorf("failed to save hub grove ID: %w", err)
+				}
+			}
+			hubLookupID = hubGroveID
 		}
+	}
+
+	// Use the hub grove ID for all hub API calls from here on
+	effectiveHubGroveID := hubLookupID
+	if effectiveHubGroveID == "" {
+		effectiveHubGroveID = groveID
 	}
 
 	// If this host is a registered broker, add it as a provider for this grove
@@ -1933,10 +1958,10 @@ func runHubLink(cmd *cobra.Command, args []string) error {
 			BrokerID:  localBrokerID,
 			LocalPath: resolvedPath,
 		}
-		if _, err := client.Groves().AddProvider(ctx, groveID, addReq); err != nil {
+		if _, err := client.Groves().AddProvider(ctx, effectiveHubGroveID, addReq); err != nil {
 			util.Debugf("Failed to add broker as provider during link: %v", err)
 		} else {
-			util.Debugf("Registered local broker %s as provider for grove %s", localBrokerName, groveID)
+			util.Debugf("Registered local broker %s as provider for grove %s", localBrokerName, effectiveHubGroveID)
 		}
 	}
 
@@ -1958,9 +1983,10 @@ func runHubLink(cmd *cobra.Command, args []string) error {
 			Command: "hub link",
 			Message: fmt.Sprintf("Grove '%s' is now linked to the Hub.", groveName),
 			Details: map[string]interface{}{
-				"grove":    groveName,
-				"groveId":  groveID,
-				"endpoint": endpoint,
+				"grove":      groveName,
+				"groveId":    groveID,
+				"hubGroveId": effectiveHubGroveID,
+				"endpoint":   endpoint,
 			},
 		})
 	}
@@ -1975,7 +2001,7 @@ func runHubLink(cmd *cobra.Command, args []string) error {
 			Client:    client,
 			Endpoint:  endpoint,
 			Settings:  settings,
-			GroveID:   groveID,
+			GroveID:   effectiveHubGroveID,
 			GrovePath: resolvedPath,
 			IsGlobal:  isGlobal,
 		}
@@ -2071,7 +2097,7 @@ func offerTemplateSyncOnLink(grovePath, endpoint, groveID string) {
 }
 
 // registerGroveOnHub registers a new grove on the Hub.
-func registerGroveOnHub(ctx context.Context, client hubclient.Client, groveID, groveName, grovePath string, isGlobal bool) error {
+func registerGroveOnHub(ctx context.Context, client hubclient.Client, groveID, groveName, grovePath string, isGlobal bool) (string, error) {
 	var gitRemote string
 	if !isGlobal {
 		gitRemote = util.GetGitRemote()
@@ -2086,7 +2112,7 @@ func registerGroveOnHub(ctx context.Context, client hubclient.Client, groveID, g
 
 	resp, err := client.Groves().Register(ctx, req)
 	if err != nil {
-		return fmt.Errorf("failed to register grove: %w", err)
+		return "", fmt.Errorf("failed to register grove: %w", err)
 	}
 
 	if resp.Created {
@@ -2095,7 +2121,7 @@ func registerGroveOnHub(ctx context.Context, client hubclient.Client, groveID, g
 		fmt.Printf("Linked to existing grove: %s (ID: %s)\n", resp.Grove.Name, resp.Grove.ID)
 	}
 
-	return nil
+	return resp.Grove.ID, nil
 }
 
 func runHubUnlink(cmd *cobra.Command, args []string) error {
@@ -2139,9 +2165,12 @@ func runHubUnlink(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("unlinking cancelled")
 	}
 
-	// Disable Hub integration for this grove
+	// Disable Hub integration and clear the hub grove ID
 	if err := config.UpdateSetting(resolvedPath, "hub.enabled", "false", isGlobal); err != nil {
 		return fmt.Errorf("failed to disable hub: %w", err)
+	}
+	if err := config.UpdateSetting(resolvedPath, "hub.groveId", "", isGlobal); err != nil {
+		util.Debugf("Failed to clear hub.groveId: %v", err)
 	}
 
 	if isJSONOutput() {

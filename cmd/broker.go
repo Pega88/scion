@@ -411,8 +411,11 @@ func runBrokerRegister(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Check if grove is linked
-	groveID := settings.GroveID
+	// Check if grove is linked — prefer hub.groveId over grove_id
+	groveID := settings.GetHubGroveID()
+	if groveID == "" {
+		groveID = settings.GroveID
+	}
 	groveLinked := false
 	if groveID != "" {
 		groveLinked, _ = isGroveLinked(ctx, client, groveID)
@@ -430,7 +433,10 @@ func runBrokerRegister(cmd *cobra.Command, args []string) error {
 			if err != nil {
 				return fmt.Errorf("failed to reload settings: %w", err)
 			}
-			groveID = settings.GroveID
+			groveID = settings.GetHubGroveID()
+			if groveID == "" {
+				groveID = settings.GroveID
+			}
 		}
 	}
 
@@ -1028,7 +1034,10 @@ func runBrokerProvide(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to load settings: %w", err)
 		}
 
-		groveID = settings.GroveID
+		groveID = settings.GetHubGroveID()
+		if groveID == "" {
+			groveID = settings.GroveID
+		}
 		if groveID == "" {
 			return fmt.Errorf("current grove is not linked to the Hub.\n\nLink it first with: scion hub link\nOr specify a grove with --grove <name-or-id>")
 		}
@@ -1212,7 +1221,10 @@ func runBrokerWithdraw(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to load settings: %w", err)
 		}
 
-		groveID = settings.GroveID
+		groveID = settings.GetHubGroveID()
+		if groveID == "" {
+			groveID = settings.GroveID
+		}
 		if groveID == "" {
 			return fmt.Errorf("current grove is not linked to the Hub.\n\nSpecify a grove with --grove <name-or-id>")
 		}

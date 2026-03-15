@@ -411,8 +411,11 @@ func handleUnlinkedGrovePrompt(cmd *cobra.Command, args []string) bool {
 		return false // Hub not reachable, different error
 	}
 
-	// Check if grove is registered
-	groveID := settings.GroveID
+	// Check if grove is registered — prefer hub.groveId over grove_id
+	groveID := settings.GetHubGroveID()
+	if groveID == "" {
+		groveID = settings.GroveID
+	}
 	if groveID == "" {
 		groveID = config.GenerateGroveIDForDir(resolvedPath)
 	}

@@ -131,8 +131,12 @@ func runClean(cmd *cobra.Command, args []string) error {
 					hubReachable = true
 
 					// Check if grove is registered on Hub
-					if settings.GroveID != "" {
-						linked, _ := isGroveLinked(ctx, client, settings.GroveID)
+					lookupID := settings.GetHubGroveID()
+					if lookupID == "" {
+						lookupID = settings.GroveID
+					}
+					if lookupID != "" {
+						linked, _ := isGroveLinked(ctx, client, lookupID)
 						hubLinked = linked
 					}
 				} else {
