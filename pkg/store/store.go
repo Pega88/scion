@@ -354,6 +354,7 @@ type UserStore interface {
 type UserFilter struct {
 	Role   string
 	Status string
+	Search string // fuzzy match on email and display_name
 }
 
 // GroveProviderStore defines grove-broker relationship operations.

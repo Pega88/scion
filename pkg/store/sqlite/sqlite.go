@@ -2709,6 +2709,11 @@ func (s *SQLiteStore) ListUsers(ctx context.Context, filter store.UserFilter, op
 		conditions = append(conditions, "status = ?")
 		args = append(args, filter.Status)
 	}
+	if filter.Search != "" {
+		pattern := "%" + filter.Search + "%"
+		conditions = append(conditions, "(email LIKE ? OR display_name LIKE ?)")
+		args = append(args, pattern, pattern)
+	}
 
 	whereClause := ""
 	if len(conditions) > 0 {

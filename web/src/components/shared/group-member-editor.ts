@@ -63,6 +63,13 @@ export class ScionGroupMemberEditor extends LitElement {
   @state() private availableGroups: AdminGroup[] = [];
   @state() private groupsLoading = false;
 
+  // User search autocomplete state
+  @state() private userSearchQuery = '';
+  @state() private userSearchResults: Array<{ id: string; email: string; displayName: string }> = [];
+  @state() private userSearchLoading = false;
+  @state() private userSearchOpen = false;
+  private userSearchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
   // Removing state
   @state() private removingMember: string | null = null;
 
@@ -343,6 +350,62 @@ export class ScionGroupMemberEditor extends LitElement {
       border-radius: var(--scion-radius, 0.5rem);
     }
 
+    /* User search autocomplete */
+    .user-search-container {
+      position: relative;
+    }
+
+    .user-search-dropdown {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      z-index: 1000;
+      background: var(--scion-surface, #ffffff);
+      border: 1px solid var(--scion-border, #e2e8f0);
+      border-radius: var(--scion-radius, 0.5rem);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+      max-height: 200px;
+      overflow-y: auto;
+      margin-top: 0.25rem;
+    }
+
+    .user-search-option {
+      display: flex;
+      flex-direction: column;
+      padding: 0.5rem 0.75rem;
+      cursor: pointer;
+      border-bottom: 1px solid var(--scion-border, #e2e8f0);
+    }
+
+    .user-search-option:last-child {
+      border-bottom: none;
+    }
+
+    .user-search-option:hover,
+    .user-search-option.focused {
+      background: var(--scion-bg-subtle, #f1f5f9);
+    }
+
+    .user-search-option .user-name {
+      font-weight: 500;
+      font-size: 0.875rem;
+      color: var(--scion-text, #1e293b);
+    }
+
+    .user-search-option .user-email {
+      font-size: 0.75rem;
+      color: var(--scion-text-muted, #64748b);
+    }
+
+    .user-search-empty,
+    .user-search-loading {
+      padding: 0.75rem;
+      text-align: center;
+      font-size: 0.8125rem;
+      color: var(--scion-text-muted, #64748b);
+    }
+
     @media (max-width: 768px) {
       .hide-mobile {
         display: none;
@@ -406,11 +469,60 @@ export class ScionGroupMemberEditor extends LitElement {
     }
   }
 
+  private handleUserSearchInput(e: Event): void {
+    const value = (e.target as HTMLInputElement).value;
+    this.userSearchQuery = value;
+    this.addMemberInput = value;
+
+    if (this.userSearchDebounceTimer) {
+      clearTimeout(this.userSearchDebounceTimer);
+    }
+
+    if (value.trim().length < 2) {
+      this.userSearchResults = [];
+      this.userSearchOpen = false;
+      return;
+    }
+
+    this.userSearchDebounceTimer = setTimeout(() => {
+      void this.searchUsers(value.trim());
+    }, 250);
+  }
+
+  private async searchUsers(query: string): Promise<void> {
+    this.userSearchLoading = true;
+    this.userSearchOpen = true;
+    try {
+      const response = await apiFetch(
+        `/api/v1/users?search=${encodeURIComponent(query)}&limit=10`
+      );
+      if (response.ok) {
+        const data = (await response.json()) as { users?: Array<{ id: string; email: string; displayName: string }> };
+        this.userSearchResults = data.users || [];
+      }
+    } catch (err) {
+      console.error('Failed to search users:', err);
+      this.userSearchResults = [];
+    } finally {
+      this.userSearchLoading = false;
+    }
+  }
+
+  private selectUser(user: { id: string; email: string; displayName: string }): void {
+    this.addMemberInput = user.email;
+    this.userSearchQuery = user.displayName ? `${user.displayName} (${user.email})` : user.email;
+    this.userSearchOpen = false;
+    this.userSearchResults = [];
+  }
+
   private openAddDialog(): void {
     this.addMemberType = 'user';
     this.addMemberInput = '';
     this.addMemberRole = 'member';
     this.addMemberError = null;
+    this.userSearchQuery = '';
+    this.userSearchResults = [];
+    this.userSearchOpen = false;
     this.addDialogOpen = true;
     void this.loadAvailableGroups();
   }
@@ -424,7 +536,7 @@ export class ScionGroupMemberEditor extends LitElement {
 
     if (!this.addMemberInput.trim()) {
       this.addMemberError = this.addMemberType === 'user'
-        ? 'Email address is required'
+        ? 'Please search for and select a user'
         : this.addMemberType === 'group'
           ? 'Please select a group'
           : 'Member ID is required';
@@ -687,7 +799,7 @@ export class ScionGroupMemberEditor extends LitElement {
     if (this.readOnly) return nothing;
 
     const inputLabel = this.addMemberType === 'user'
-      ? 'Email Address'
+      ? 'User'
       : this.addMemberType === 'group'
         ? 'Group'
         : 'Agent ID';
@@ -712,6 +824,9 @@ export class ScionGroupMemberEditor extends LitElement {
               this.addMemberType = (e.target as HTMLSelectElement).value;
               this.addMemberInput = '';
               this.addMemberError = null;
+              this.userSearchQuery = '';
+              this.userSearchResults = [];
+              this.userSearchOpen = false;
             }}
           >
             <sl-option value="user">
@@ -748,18 +863,65 @@ export class ScionGroupMemberEditor extends LitElement {
                         )}
                 </sl-select>
               `
-            : html`
-                <sl-input
-                  label=${inputLabel}
-                  placeholder=${inputHint}
-                  value=${this.addMemberInput}
-                  type=${this.addMemberType === 'user' ? 'email' : 'text'}
-                  @sl-input=${(e: Event) => {
-                    this.addMemberInput = (e.target as HTMLInputElement).value;
-                  }}
-                  required
-                ></sl-input>
-              `}
+            : this.addMemberType === 'user'
+              ? html`
+                  <div class="user-search-container">
+                    <sl-input
+                      label=${inputLabel}
+                      placeholder="Search by name or email..."
+                      value=${this.userSearchQuery}
+                      type="text"
+                      autocomplete="off"
+                      @sl-input=${this.handleUserSearchInput}
+                      @sl-focus=${() => {
+                        if (this.userSearchResults.length > 0) this.userSearchOpen = true;
+                      }}
+                      @sl-blur=${() => {
+                        // Delay to allow click on dropdown
+                        setTimeout(() => { this.userSearchOpen = false; }, 200);
+                      }}
+                      required
+                    ></sl-input>
+                    ${this.userSearchOpen
+                      ? html`
+                          <div class="user-search-dropdown">
+                            ${this.userSearchLoading
+                              ? html`<div class="user-search-loading"><sl-spinner></sl-spinner> Searching...</div>`
+                              : this.userSearchResults.length === 0
+                                ? html`<div class="user-search-empty">No users found</div>`
+                                : this.userSearchResults.map(
+                                    (user) => html`
+                                      <div
+                                        class="user-search-option"
+                                        @mousedown=${(e: Event) => {
+                                          e.preventDefault();
+                                          this.selectUser(user);
+                                        }}
+                                      >
+                                        <span class="user-name">${user.displayName || user.email}</span>
+                                        ${user.displayName
+                                          ? html`<span class="user-email">${user.email}</span>`
+                                          : nothing}
+                                      </div>
+                                    `
+                                  )}
+                          </div>
+                        `
+                      : nothing}
+                  </div>
+                `
+              : html`
+                  <sl-input
+                    label=${inputLabel}
+                    placeholder=${inputHint}
+                    value=${this.addMemberInput}
+                    type="text"
+                    @sl-input=${(e: Event) => {
+                      this.addMemberInput = (e.target as HTMLInputElement).value;
+                    }}
+                    required
+                  ></sl-input>
+                `}
 
           <sl-select
             label="Role"

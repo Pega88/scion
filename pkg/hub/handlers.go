@@ -4408,6 +4408,7 @@ func (s *Server) listUsers(w http.ResponseWriter, r *http.Request) {
 	filter := store.UserFilter{
 		Role:   query.Get("role"),
 		Status: query.Get("status"),
+		Search: query.Get("search"),
 	}
 
 	limit := 50
