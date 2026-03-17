@@ -744,7 +744,7 @@ func TestDevAuth_SessionPersists(t *testing.T) {
 	body1, _ := io.ReadAll(resp1.Body)
 	var user1 webSessionUser
 	require.NoError(t, json.Unmarshal(body1, &user1))
-	assert.Equal(t, "dev-user", user1.UserID)
+	assert.Equal(t, DevUserID, user1.UserID)
 	assert.Equal(t, "dev@localhost", user1.Email)
 	assert.Equal(t, "Development User", user1.Name)
 
@@ -762,7 +762,7 @@ func TestDevAuth_SessionPersists(t *testing.T) {
 	body2, _ := io.ReadAll(resp2.Body)
 	var user2 webSessionUser
 	require.NoError(t, json.Unmarshal(body2, &user2))
-	assert.Equal(t, "dev-user", user2.UserID)
+	assert.Equal(t, DevUserID, user2.UserID)
 }
 
 func TestDevAuth_Disabled(t *testing.T) {
@@ -812,7 +812,7 @@ func TestAuthMe_Authenticated(t *testing.T) {
 	body, _ := io.ReadAll(resp.Body)
 	var user webSessionUser
 	require.NoError(t, json.Unmarshal(body, &user))
-	assert.Equal(t, "dev-user", user.UserID)
+	assert.Equal(t, DevUserID, user.UserID)
 	assert.Equal(t, "dev@localhost", user.Email)
 	assert.Equal(t, "Development User", user.Name)
 }
@@ -1586,7 +1586,7 @@ func TestSPAShellHandler_UserInInitialData(t *testing.T) {
 	// User info should be present even without API prefetch
 	userObj, ok := pageData["user"].(map[string]interface{})
 	require.True(t, ok, "user should be a JSON object")
-	assert.Equal(t, "dev-user", userObj["id"])
+	assert.Equal(t, DevUserID, userObj["id"])
 	assert.Equal(t, "dev@localhost", userObj["email"])
 	assert.Equal(t, "Development User", userObj["name"])
 	assert.Equal(t, "admin", userObj["role"])

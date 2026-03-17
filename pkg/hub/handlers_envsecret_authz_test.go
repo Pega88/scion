@@ -75,7 +75,7 @@ func TestEnvVar_UserScope_AdminAccess(t *testing.T) {
 	if resp.ScopeID == "default" {
 		t.Error("scopeId should not be 'default' — should be the authenticated user's ID")
 	}
-	if resp.ScopeID != "dev-user" {
+	if resp.ScopeID != DevUserID {
 		t.Errorf("expected scopeId 'dev-user', got %q", resp.ScopeID)
 	}
 }
@@ -134,7 +134,7 @@ func TestEnvVar_UserScope_CreateAndGet(t *testing.T) {
 	}
 
 	// CreatedBy should be populated
-	if setResp.EnvVar.CreatedBy != "dev-user" {
+	if setResp.EnvVar.CreatedBy != DevUserID {
 		t.Errorf("expected createdBy 'dev-user', got %q", setResp.EnvVar.CreatedBy)
 	}
 
@@ -812,9 +812,9 @@ func TestEnvVar_UnifiedList_MergesSecrets(t *testing.T) {
 		SecretType:     store.SecretTypeEnvironment,
 		Target:         "SECRET_ENV_VAR",
 		Scope:          store.ScopeUser,
-		ScopeID:        "dev-user",
+		ScopeID:        DevUserID,
 		Description:    "A secret env var",
-		CreatedBy:      "dev-user",
+		CreatedBy:      DevUserID,
 	}); err != nil {
 		t.Fatalf("failed to create secret: %v", err)
 	}
@@ -875,7 +875,7 @@ func TestEnvVar_UnifiedList_Deduplication(t *testing.T) {
 		SecretType:     store.SecretTypeEnvironment,
 		Target:         "DUPED_KEY",
 		Scope:          store.ScopeUser,
-		ScopeID:        "dev-user",
+		ScopeID:        DevUserID,
 	}); err != nil {
 		t.Fatalf("failed to create secret: %v", err)
 	}
@@ -916,7 +916,7 @@ func TestEnvVar_FallbackGet_FromSecretBackend(t *testing.T) {
 		SecretType:     store.SecretTypeEnvironment,
 		Target:         "ONLY_SECRET",
 		Scope:          store.ScopeUser,
-		ScopeID:        "dev-user",
+		ScopeID:        DevUserID,
 		Description:    "Only in secret backend",
 	}); err != nil {
 		t.Fatalf("failed to create secret: %v", err)
@@ -957,7 +957,7 @@ func TestEnvVar_FallbackDelete_FromSecretBackend(t *testing.T) {
 		SecretType:     store.SecretTypeEnvironment,
 		Target:         "DEL_SECRET",
 		Scope:          store.ScopeUser,
-		ScopeID:        "dev-user",
+		ScopeID:        DevUserID,
 	}); err != nil {
 		t.Fatalf("failed to create secret: %v", err)
 	}
@@ -988,7 +988,7 @@ func TestEnvVar_StaleCleanup_PlainEnvVarRemovedOnPromotion(t *testing.T) {
 	}
 
 	// Verify it's in the store
-	_, err := s.GetEnvVar(ctx, "UPGRADE_ME", store.ScopeUser, "dev-user")
+	_, err := s.GetEnvVar(ctx, "UPGRADE_ME", store.ScopeUser, DevUserID)
 	if err != nil {
 		t.Fatalf("expected env var in store, got error: %v", err)
 	}
@@ -1002,7 +1002,7 @@ func TestEnvVar_StaleCleanup_PlainEnvVarRemovedOnPromotion(t *testing.T) {
 	}
 
 	// Plain env var should be removed after successful promotion
-	_, err = s.GetEnvVar(ctx, "UPGRADE_ME", store.ScopeUser, "dev-user")
+	_, err = s.GetEnvVar(ctx, "UPGRADE_ME", store.ScopeUser, DevUserID)
 	if err != store.ErrNotFound {
 		t.Errorf("plain env var should be removed after promotion, got err: %v", err)
 	}
@@ -1021,7 +1021,7 @@ func TestEnvVar_NonEnvironmentSecrets_NotMerged(t *testing.T) {
 		SecretType:     store.SecretTypeVariable,
 		Target:         "VARIABLE_SECRET",
 		Scope:          store.ScopeUser,
-		ScopeID:        "dev-user",
+		ScopeID:        DevUserID,
 	}); err != nil {
 		t.Fatalf("failed to create secret: %v", err)
 	}
@@ -1049,7 +1049,7 @@ func TestEnvVar_GroveScope_SecretPromotion_Succeeds(t *testing.T) {
 
 	grove := &store.Grove{
 		ID: "grove_promo_test", Name: "Promo Grove", Slug: "promo-grove",
-		OwnerID: "dev-user", Created: time.Now(), Updated: time.Now(),
+		OwnerID: DevUserID, Created: time.Now(), Updated: time.Now(),
 	}
 	if err := s.CreateGrove(ctx, grove); err != nil {
 		t.Fatalf("failed to create grove: %v", err)
@@ -1069,7 +1069,7 @@ func TestEnvVar_GroveScope_UnifiedList(t *testing.T) {
 
 	grove := &store.Grove{
 		ID: "grove_unified_list", Name: "Unified Grove", Slug: "unified-grove",
-		OwnerID: "dev-user", Created: time.Now(), Updated: time.Now(),
+		OwnerID: DevUserID, Created: time.Now(), Updated: time.Now(),
 	}
 	if err := s.CreateGrove(ctx, grove); err != nil {
 		t.Fatalf("failed to create grove: %v", err)
@@ -1129,7 +1129,7 @@ func TestEnvVar_GroveScope_FallbackGet(t *testing.T) {
 
 	grove := &store.Grove{
 		ID: "grove_fallback_get", Name: "Fallback Get Grove", Slug: "fallback-get-grove",
-		OwnerID: "dev-user", Created: time.Now(), Updated: time.Now(),
+		OwnerID: DevUserID, Created: time.Now(), Updated: time.Now(),
 	}
 	if err := s.CreateGrove(ctx, grove); err != nil {
 		t.Fatalf("failed to create grove: %v", err)
@@ -1166,7 +1166,7 @@ func TestEnvVar_GroveScope_FallbackDelete(t *testing.T) {
 
 	grove := &store.Grove{
 		ID: "grove_fallback_del", Name: "Fallback Del Grove", Slug: "fallback-del-grove",
-		OwnerID: "dev-user", Created: time.Now(), Updated: time.Now(),
+		OwnerID: DevUserID, Created: time.Now(), Updated: time.Now(),
 	}
 	if err := s.CreateGrove(ctx, grove); err != nil {
 		t.Fatalf("failed to create grove: %v", err)

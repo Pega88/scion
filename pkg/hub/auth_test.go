@@ -338,14 +338,14 @@ func TestIdentityFromContext(t *testing.T) {
 	})
 
 	t.Run("user identity", func(t *testing.T) {
-		user := &DevUser{id: "dev-user"}
+		user := &DevUser{id: DevUserID}
 		ctx := context.WithValue(context.Background(), userContextKey{}, user)
 		identity := GetIdentityFromContext(ctx)
 		if identity == nil {
 			t.Fatal("expected identity, got nil")
 		}
-		if identity.ID() != "dev-user" {
-			t.Errorf("expected ID 'dev-user', got %q", identity.ID())
+		if identity.ID() != DevUserID {
+			t.Errorf("expected ID %q, got %q", DevUserID, identity.ID())
 		}
 	})
 

@@ -1274,7 +1274,7 @@ func TestGroveRoute_ResolvesUserScopedEnvVars(t *testing.T) {
 		Key:     "GEMINI_API_KEY",
 		Value:   "user-scoped-gemini-key",
 		Scope:   "user",
-		ScopeID: "dev-user",
+		ScopeID: DevUserID,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1323,8 +1323,8 @@ func TestGroveRoute_ResolvesUserScopedEnvVars(t *testing.T) {
 	if agent.OwnerID == "" {
 		t.Error("expected OwnerID to be set on agent created via grove route")
 	}
-	if agent.OwnerID != "dev-user" {
-		t.Errorf("expected OwnerID=%q, got %q", "dev-user", agent.OwnerID)
+	if agent.OwnerID != DevUserID {
+		t.Errorf("expected OwnerID=%q, got %q", DevUserID, agent.OwnerID)
 	}
 }
 
@@ -1362,7 +1362,7 @@ func TestGroveRoute_ResolvesUserScopedSecrets(t *testing.T) {
 		Value:      "secret-gemini-key",
 		SecretType: secret.TypeEnvironment,
 		Scope:      secret.ScopeUser,
-		ScopeID:    "dev-user",
+		ScopeID:    DevUserID,
 	})
 	if err != nil {
 		t.Fatal(err)

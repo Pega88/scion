@@ -759,11 +759,11 @@ func TestIntegration_MultipleSubscribers_AgentAndUser(t *testing.T) {
 		ID:              "user-sub-multi",
 		AgentID:         child.ID,
 		SubscriberType:  store.SubscriberTypeUser,
-		SubscriberID:    "dev-user",
+		SubscriberID:    DevUserID,
 		GroveID:         env.grove.ID,
 		TriggerActivities: []string{"COMPLETED"},
 		CreatedAt:       time.Now(),
-		CreatedBy:       "dev-user",
+		CreatedBy:       DevUserID,
 	}
 	require.NoError(t, env.store.CreateNotificationSubscription(ctx, userSub))
 
@@ -787,7 +787,7 @@ func TestIntegration_MultipleSubscribers_AgentAndUser(t *testing.T) {
 	assert.Len(t, agentNotifs, 1)
 
 	// Verify user notification (stored, not dispatched)
-	userNotifs, err := env.store.GetNotifications(ctx, store.SubscriberTypeUser, "dev-user", false)
+	userNotifs, err := env.store.GetNotifications(ctx, store.SubscriberTypeUser, DevUserID, false)
 	require.NoError(t, err)
 	assert.Len(t, userNotifs, 1)
 	assert.Equal(t, "COMPLETED", userNotifs[0].Status)

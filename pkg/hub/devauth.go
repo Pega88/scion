@@ -23,6 +23,10 @@ import (
 	"github.com/GoogleCloudPlatform/scion/pkg/apiclient"
 )
 
+// DevUserID is the well-known UUID for the development pseudo-user.
+// Deterministic so that references in the database remain stable across restarts.
+const DevUserID = "be67fbc9-c869-5d43-b15d-c28ca3e8d355"
+
 // DevUser represents the pseudo-user for development authentication.
 type DevUser struct {
 	id string
@@ -137,7 +141,7 @@ func DevAuthMiddlewareWithDebug(validToken string, debug bool) func(http.Handler
 			}
 
 			// Add dev user context
-			ctx := context.WithValue(r.Context(), userContextKey{}, &DevUser{id: "dev-user"})
+			ctx := context.WithValue(r.Context(), userContextKey{}, &DevUser{id: DevUserID})
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

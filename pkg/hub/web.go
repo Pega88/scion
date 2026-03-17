@@ -1010,7 +1010,7 @@ func (ws *WebServer) devAuthMiddleware(next http.Handler) http.Handler {
 
 		// No user — auto-login with dev identity
 		devUser := &webSessionUser{
-			UserID:    "dev-user",
+			UserID:    DevUserID,
 			Email:     "dev@localhost",
 			Name:      "Development User",
 			AvatarURL: "",

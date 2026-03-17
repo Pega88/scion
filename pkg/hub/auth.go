@@ -168,7 +168,7 @@ func UnifiedAuthMiddleware(cfg AuthConfig) func(http.Handler) http.Handler {
 						"invalid development token", nil)
 					return
 				}
-				devUser := &DevUser{id: "dev-user"}
+				devUser := &DevUser{id: DevUserID}
 				ctx = context.WithValue(ctx, userContextKey{}, devUser)
 				ctx = contextWithIdentity(ctx, devUser)
 				if cfg.Debug {
@@ -197,7 +197,7 @@ func UnifiedAuthMiddleware(cfg AuthConfig) func(http.Handler) http.Handler {
 				if cfg.UserTokenSvc == nil {
 					// Fall back to dev auth if user tokens not configured
 					if cfg.DevAuthEnabled && apiclient.ValidateDevToken(token, cfg.DevAuthToken) {
-						devUser := &DevUser{id: "dev-user"}
+						devUser := &DevUser{id: DevUserID}
 						ctx = context.WithValue(ctx, userContextKey{}, devUser)
 						ctx = contextWithIdentity(ctx, devUser)
 						if cfg.Debug {

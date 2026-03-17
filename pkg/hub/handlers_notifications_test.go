@@ -55,8 +55,8 @@ func setupNotificationHandlerTest(t *testing.T) (*Server, store.Store, string) {
 	require.NoError(t, s.CreateAgent(ctx, agent))
 
 	// The dev auth middleware creates a user identity with a deterministic ID.
-	// We use "dev-user" as the subscriber ID to match what the middleware produces.
-	userID := "dev-user"
+	// We use DevUserID as the subscriber ID to match what the middleware produces.
+	userID := DevUserID
 
 	sub := &store.NotificationSubscription{
 		ID:              api.NewUUID(),
@@ -143,7 +143,7 @@ func TestHandleNotifications_AcknowledgeSingle(t *testing.T) {
 	assert.Equal(t, "ok", resp["status"])
 
 	// Verify the notification is now acknowledged
-	notifs, err := s.GetNotifications(context.Background(), "user", "dev-user", true)
+	notifs, err := s.GetNotifications(context.Background(), "user", DevUserID, true)
 	require.NoError(t, err)
 	for _, n := range notifs {
 		if n.ID == notifID {
@@ -163,7 +163,7 @@ func TestHandleNotifications_AcknowledgeAll(t *testing.T) {
 	assert.Equal(t, "ok", resp["status"])
 
 	// All notifications should now be acknowledged
-	notifs, err := s.GetNotifications(context.Background(), "user", "dev-user", true)
+	notifs, err := s.GetNotifications(context.Background(), "user", DevUserID, true)
 	require.NoError(t, err)
 	for _, n := range notifs {
 		assert.True(t, n.Acknowledged, "notification %s should be acknowledged", n.ID)
@@ -226,7 +226,7 @@ func TestHandleNotifications_FilterByAgent(t *testing.T) {
 	srv, s, _ := setupNotificationHandlerTest(t)
 	ctx := context.Background()
 
-	// The setup already created "agent-watched" with user notifications for "dev-user".
+	// The setup already created "agent-watched" with user notifications for DevUserID.
 	// Create a second agent that watches "agent-watched", so "agent-watched" is the
 	// subscriber (simulating notifications sent TO the watched agent).
 	agent2 := &store.Agent{
@@ -372,7 +372,7 @@ func TestCreateGroveAgent_NotifyCreatesSubscription(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, subs, 1, "expected exactly 1 notification subscription for the agent")
 	assert.Equal(t, store.SubscriberTypeUser, subs[0].SubscriberType)
-	assert.Equal(t, "dev-user", subs[0].SubscriberID)
+	assert.Equal(t, DevUserID, subs[0].SubscriberID)
 	assert.Equal(t, grove.ID, subs[0].GroveID)
 	assert.Contains(t, subs[0].TriggerActivities, "COMPLETED")
 	assert.Contains(t, subs[0].TriggerActivities, "WAITING_FOR_INPUT")
