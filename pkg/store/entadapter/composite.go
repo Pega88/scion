@@ -271,6 +271,10 @@ func (c *CompositeStore) GetGroupsByIDs(ctx context.Context, ids []string) ([]st
 	return c.groups.GetGroupsByIDs(ctx, ids)
 }
 
+func (c *CompositeStore) CountGroupMembersByRole(ctx context.Context, groupID, role string) (int, error) {
+	return c.groups.CountGroupMembersByRole(ctx, groupID, role)
+}
+
 // PolicyStore method overrides — delegate to Ent-backed PolicyStore.
 
 func (c *CompositeStore) CreatePolicy(ctx context.Context, policy *store.Policy) error {

@@ -1298,6 +1298,62 @@ func TestGetGroupsByIDs_MissingIDs(t *testing.T) {
 	assert.Equal(t, "Exists", groups[0].Name)
 }
 
+func TestCountGroupMembersByRole(t *testing.T) {
+	gs := newTestGroupStore(t)
+	ctx := context.Background()
+
+	// Create a second user for the test
+	testUser2UID := uuid.MustParse("10000000-0000-0000-0000-000000000002")
+	_, err := gs.client.User.Create().
+		SetID(testUser2UID).
+		SetEmail("test2@example.com").
+		SetDisplayName("Test User 2").
+		Save(ctx)
+	require.NoError(t, err)
+
+	g := &store.Group{
+		ID:   uuid.New().String(),
+		Name: "Count Roles",
+		Slug: "count-roles",
+	}
+	require.NoError(t, gs.CreateGroup(ctx, g))
+
+	// No owners initially
+	count, err := gs.CountGroupMembersByRole(ctx, g.ID, store.GroupMemberRoleOwner)
+	require.NoError(t, err)
+	assert.Equal(t, 0, count)
+
+	// Add one owner
+	require.NoError(t, gs.AddGroupMember(ctx, &store.GroupMember{
+		GroupID:    g.ID,
+		MemberType: store.GroupMemberTypeUser,
+		MemberID:   testUserUID.String(),
+		Role:       store.GroupMemberRoleOwner,
+	}))
+
+	count, err = gs.CountGroupMembersByRole(ctx, g.ID, store.GroupMemberRoleOwner)
+	require.NoError(t, err)
+	assert.Equal(t, 1, count)
+
+	// Add a member (not owner)
+	require.NoError(t, gs.AddGroupMember(ctx, &store.GroupMember{
+		GroupID:    g.ID,
+		MemberType: store.GroupMemberTypeUser,
+		MemberID:   testUser2UID.String(),
+		Role:       store.GroupMemberRoleMember,
+	}))
+
+	// Owner count should still be 1
+	count, err = gs.CountGroupMembersByRole(ctx, g.ID, store.GroupMemberRoleOwner)
+	require.NoError(t, err)
+	assert.Equal(t, 1, count)
+
+	// Member count should be 1
+	count, err = gs.CountGroupMembersByRole(ctx, g.ID, store.GroupMemberRoleMember)
+	require.NoError(t, err)
+	assert.Equal(t, 1, count)
+}
+
 func TestListGroupsWithGroveIDFilter(t *testing.T) {
 	gs := newTestGroupStore(t)
 	ctx := context.Background()

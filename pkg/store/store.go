@@ -531,6 +531,9 @@ type GroupStore interface {
 	// delegation enabled, its creator is active, and the conditions match.
 	CheckDelegatedAccess(ctx context.Context, agentID string, conditions *PolicyConditions) (bool, error)
 
+	// CountGroupMembersByRole counts how many members of a group have the given role.
+	CountGroupMembersByRole(ctx context.Context, groupID, role string) (int, error)
+
 	// GetGroupsByIDs retrieves groups by a list of IDs.
 	// Returns only groups that exist; missing IDs are silently skipped.
 	GetGroupsByIDs(ctx context.Context, ids []string) ([]Group, error)

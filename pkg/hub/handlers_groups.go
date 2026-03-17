@@ -16,6 +16,7 @@ package hub
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -207,6 +208,20 @@ func (s *Server) createGroup(w http.ResponseWriter, r *http.Request) {
 		}
 		writeErrorFromErr(w, err, "")
 		return
+	}
+
+	// Add the creating user as an owner of the new group
+	if createdBy != "" {
+		if err := s.store.AddGroupMember(ctx, &store.GroupMember{
+			GroupID:    group.ID,
+			MemberType: store.GroupMemberTypeUser,
+			MemberID:   createdBy,
+			Role:       store.GroupMemberRoleOwner,
+		}); err != nil && err != store.ErrAlreadyExists {
+			// Log but don't fail the group creation
+			slog.Warn("failed to add creator as owner of new group",
+				"group", group.ID, "user", createdBy, "error", err)
+		}
 	}
 
 	writeJSON(w, http.StatusCreated, group)
@@ -498,6 +513,33 @@ func (s *Server) addGroupMember(w http.ResponseWriter, r *http.Request, group *s
 		return
 	}
 
+	// Enforce role-hierarchy: only owners can add owners/admins; admins can only add members.
+	if req.Role == store.GroupMemberRoleOwner || req.Role == store.GroupMemberRoleAdmin {
+		if userIdent := GetUserIdentityFromContext(ctx); userIdent != nil {
+			callerMembership, err := s.store.GetGroupMembership(ctx, groupID, store.GroupMemberTypeUser, userIdent.ID())
+			if err != nil || callerMembership.Role != store.GroupMemberRoleOwner {
+				writeError(w, http.StatusForbidden, ErrCodeForbidden,
+					"Only group owners can add owners or admins", nil)
+				return
+			}
+		}
+	} else if req.Role == store.GroupMemberRoleMember {
+		if userIdent := GetUserIdentityFromContext(ctx); userIdent != nil {
+			callerMembership, err := s.store.GetGroupMembership(ctx, groupID, store.GroupMemberTypeUser, userIdent.ID())
+			if err != nil || (callerMembership.Role != store.GroupMemberRoleOwner && callerMembership.Role != store.GroupMemberRoleAdmin) {
+				// The general authz check already passed, so only restrict if they are
+				// neither owner nor admin in the group itself
+				if err != nil {
+					// Caller is not a member at all — authz may have allowed via policy,
+					// which is fine for general access but not for member management
+					writeError(w, http.StatusForbidden, ErrCodeForbidden,
+						"Only group owners or admins can add members", nil)
+					return
+				}
+			}
+		}
+	}
+
 	// Resolve the member ID from human-friendly identifiers.
 	// For users: accept email addresses in addition to UUIDs.
 	// For groups: accept slugs in addition to UUIDs.
@@ -659,6 +701,26 @@ func (s *Server) removeGroupMember(w http.ResponseWriter, r *http.Request, group
 		if !decision.Allowed {
 			writeError(w, http.StatusForbidden, ErrCodeForbidden, "Access denied", nil)
 			return
+		}
+	}
+
+	// Prevent removing the last owner of a group
+	if memberType == store.GroupMemberTypeUser {
+		membership, err := s.store.GetGroupMembership(ctx, group.ID, memberType, memberID)
+		if err != nil {
+			writeErrorFromErr(w, err, "")
+			return
+		}
+		if membership.Role == store.GroupMemberRoleOwner {
+			ownerCount, err := s.store.CountGroupMembersByRole(ctx, group.ID, store.GroupMemberRoleOwner)
+			if err != nil {
+				writeErrorFromErr(w, err, "")
+				return
+			}
+			if ownerCount <= 1 {
+				BadRequest(w, "Cannot remove the last owner of a group")
+				return
+			}
 		}
 	}
 

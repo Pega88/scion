@@ -3835,6 +3835,18 @@ func (s *SQLiteStore) GetGroupsByIDs(ctx context.Context, ids []string) ([]store
 	return nil, nil
 }
 
+func (s *SQLiteStore) CountGroupMembersByRole(ctx context.Context, groupID, role string) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM group_members WHERE group_id = ? AND role = ?`,
+		groupID, role,
+	).Scan(&count)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
 // ============================================================================
 // Policy Operations
 // ============================================================================

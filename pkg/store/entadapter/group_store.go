@@ -870,6 +870,26 @@ func (s *GroupStore) CheckDelegatedAccess(ctx context.Context, agentID string, c
 	return false, nil
 }
 
+// CountGroupMembersByRole counts how many members of a group have the given role.
+func (s *GroupStore) CountGroupMembersByRole(ctx context.Context, groupID, role string) (int, error) {
+	groupUID, err := parseUUID(groupID)
+	if err != nil {
+		return 0, err
+	}
+
+	count, err := s.client.GroupMembership.Query().
+		Where(
+			groupmembership.GroupIDEQ(groupUID),
+			groupmembership.RoleEQ(groupmembership.Role(role)),
+		).
+		Count(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	return count, nil
+}
+
 // GetGroupsByIDs retrieves groups by a list of IDs.
 // Returns only groups that exist; missing IDs are silently skipped.
 func (s *GroupStore) GetGroupsByIDs(ctx context.Context, ids []string) ([]store.Group, error) {

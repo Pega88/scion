@@ -2284,15 +2284,15 @@ func (s *Server) createGroveMembersGroupAndPolicy(ctx context.Context, grove *st
 		}
 	}
 
-	// Add the creating user as a member (idempotent — ErrAlreadyExists is fine)
+	// Add the creating user as an owner of the grove members group
 	if grove.CreatedBy != "" {
 		if err := s.store.AddGroupMember(ctx, &store.GroupMember{
 			GroupID:    membersGroup.ID,
 			MemberType: store.GroupMemberTypeUser,
 			MemberID:   grove.CreatedBy,
-			Role:       store.GroupMemberRoleMember,
+			Role:       store.GroupMemberRoleOwner,
 		}); err != nil && !errors.Is(err, store.ErrAlreadyExists) {
-			slog.Warn("failed to add creator to grove members group",
+			slog.Warn("failed to add creator as owner of grove members group",
 				"grove", grove.ID, "user", grove.CreatedBy, "error", err)
 		}
 	}
