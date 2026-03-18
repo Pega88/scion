@@ -259,6 +259,65 @@ func TestWebhookChannel_Validate(t *testing.T) {
 	}
 }
 
+func TestNewChannelRegistry_ValidEmail(t *testing.T) {
+	configs := []ChannelConfig{
+		{Type: "email", Params: map[string]string{
+			"host": "smtp.example.com",
+			"from": "noreply@example.com",
+			"to":   "admin@example.com",
+		}},
+	}
+	registry := NewChannelRegistry(configs, slog.Default())
+	assert.Equal(t, 1, registry.Len())
+}
+
+func TestEmailChannel_Validate(t *testing.T) {
+	tests := []struct {
+		name    string
+		params  map[string]string
+		wantErr bool
+	}{
+		{
+			"valid",
+			map[string]string{"host": "smtp.example.com", "from": "a@b.com", "to": "c@d.com"},
+			false,
+		},
+		{"missing host", map[string]string{"from": "a@b.com", "to": "c@d.com"}, true},
+		{"missing from", map[string]string{"host": "smtp.example.com", "to": "c@d.com"}, true},
+		{"missing to", map[string]string{"host": "smtp.example.com", "from": "a@b.com"}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ch := NewEmailChannel(tt.params)
+			err := ch.Validate()
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestEmailChannel_DefaultPort(t *testing.T) {
+	ch := NewEmailChannel(map[string]string{
+		"host": "smtp.example.com",
+		"from": "a@b.com",
+		"to":   "c@d.com",
+	})
+	assert.Equal(t, "587", ch.port)
+}
+
+func TestEmailChannel_CustomPort(t *testing.T) {
+	ch := NewEmailChannel(map[string]string{
+		"host": "smtp.example.com",
+		"port": "465",
+		"from": "a@b.com",
+		"to":   "c@d.com",
+	})
+	assert.Equal(t, "465", ch.port)
+}
+
 func TestSlackChannel_Validate(t *testing.T) {
 	tests := []struct {
 		name    string

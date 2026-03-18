@@ -849,3 +849,120 @@ func TestIntegration_NoNotifyFlag_NoSubscription(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, notifs)
 }
+
+// ============================================================================
+// Integration Tests: Phase 4 — PATCH, Bulk, Templates
+// ============================================================================
+
+func TestIntegration_PATCHSubscriptionTriggers(t *testing.T) {
+	env := setupIntegrationTest(t)
+	ctx := context.Background()
+
+	// Create a subscription via store (SubscriberID must match DevUserID)
+	sub := &store.NotificationSubscription{
+		ID:                "sub-patch-test",
+		Scope:             store.SubscriptionScopeGrove,
+		SubscriberType:    store.SubscriberTypeUser,
+		SubscriberID:      DevUserID,
+		GroveID:           env.grove.ID,
+		TriggerActivities: []string{"COMPLETED"},
+		CreatedAt:         time.Now(),
+		CreatedBy:         DevUserID,
+	}
+	require.NoError(t, env.store.CreateNotificationSubscription(ctx, sub))
+
+	// PATCH trigger activities via HTTP
+	patchBody, _ := json.Marshal(updateSubscriptionRequest{
+		TriggerActivities: []string{"COMPLETED", "DELETED", "ERROR"},
+	})
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/notifications/subscriptions/"+sub.ID, bytes.NewReader(patchBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+testDevToken)
+
+	rec := httptest.NewRecorder()
+	env.srv.Handler().ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+
+	var result store.NotificationSubscription
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &result))
+	assert.Equal(t, []string{"COMPLETED", "DELETED", "ERROR"}, result.TriggerActivities)
+
+	// Verify in store
+	updated, err := env.store.GetNotificationSubscription(ctx, sub.ID)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"COMPLETED", "DELETED", "ERROR"}, updated.TriggerActivities)
+}
+
+func TestIntegration_BulkCreateSubscriptions(t *testing.T) {
+	env := setupIntegrationTest(t)
+
+	reqs := []createSubscriptionRequest{
+		{
+			Scope:             store.SubscriptionScopeGrove,
+			GroveID:           env.grove.ID,
+			TriggerActivities: []string{"COMPLETED"},
+		},
+		{
+			Scope:             store.SubscriptionScopeGrove,
+			GroveID:           env.grove.ID,
+			TriggerActivities: []string{"ERROR"},
+		},
+	}
+	body, _ := json.Marshal(reqs)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/notifications/subscriptions/bulk", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+testDevToken)
+
+	rec := httptest.NewRecorder()
+	env.srv.Handler().ServeHTTP(rec, req)
+	require.Equal(t, http.StatusCreated, rec.Code, "body: %s", rec.Body.String())
+
+	var results []store.NotificationSubscription
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &results))
+	assert.Len(t, results, 2)
+}
+
+func TestIntegration_SubscriptionTemplates_CRUD(t *testing.T) {
+	env := setupIntegrationTest(t)
+
+	// Create template
+	createBody, _ := json.Marshal(createTemplateRequest{
+		Name:              "All Events",
+		Scope:             store.SubscriptionScopeGrove,
+		TriggerActivities: []string{"COMPLETED", "WAITING_FOR_INPUT", "LIMITS_EXCEEDED", "DELETED", "ERROR"},
+		GroveID:           env.grove.ID,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/notifications/templates", bytes.NewReader(createBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+testDevToken)
+
+	rec := httptest.NewRecorder()
+	env.srv.Handler().ServeHTTP(rec, req)
+	require.Equal(t, http.StatusCreated, rec.Code, "body: %s", rec.Body.String())
+
+	var created store.SubscriptionTemplate
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &created))
+	assert.Equal(t, "All Events", created.Name)
+	assert.Len(t, created.TriggerActivities, 5)
+
+	// List templates
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/notifications/templates?groveId="+env.grove.ID, nil)
+	req.Header.Set("Authorization", "Bearer "+testDevToken)
+
+	rec = httptest.NewRecorder()
+	env.srv.Handler().ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var templates []store.SubscriptionTemplate
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &templates))
+	assert.Len(t, templates, 1)
+
+	// Delete template
+	req = httptest.NewRequest(http.MethodDelete, "/api/v1/notifications/templates/"+created.ID, nil)
+	req.Header.Set("Authorization", "Bearer "+testDevToken)
+
+	rec = httptest.NewRecorder()
+	env.srv.Handler().ServeHTTP(rec, req)
+	require.Equal(t, http.StatusNoContent, rec.Code)
+}

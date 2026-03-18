@@ -39,6 +39,8 @@ var (
 	unsubscribeAll   bool
 	unsubscribeGrove string
 
+	updateTriggers string
+
 	subscriptionsGrove string
 	subscriptionsJSON  bool
 )
@@ -60,6 +62,7 @@ Commands:
   scion notifications ack [id]                Acknowledge notification(s)
   scion notifications subscribe               Create a subscription
   scion notifications unsubscribe [id]        Remove a subscription
+  scion notifications update [id]             Update a subscription's triggers
   scion notifications subscriptions           List your subscriptions`,
 	RunE: runNotificationsList,
 }
@@ -115,6 +118,18 @@ Examples:
 	RunE: runNotificationsUnsubscribe,
 }
 
+// notificationsUpdateCmd updates a subscription's trigger activities.
+var notificationsUpdateCmd = &cobra.Command{
+	Use:   "update [subscription-id]",
+	Short: "Update a subscription's trigger activities",
+	Long: `Update the trigger activities for an existing subscription.
+
+Examples:
+  scion notifications update a1b2c3d4 --triggers COMPLETED,WAITING_FOR_INPUT,DELETED`,
+	Args: cobra.ExactArgs(1),
+	RunE: runNotificationsUpdate,
+}
+
 // notificationsSubscriptionsCmd lists subscriptions.
 var notificationsSubscriptionsCmd = &cobra.Command{
 	Use:     "subscriptions",
@@ -134,6 +149,7 @@ func init() {
 	notificationsCmd.AddCommand(notificationsAckCmd)
 	notificationsCmd.AddCommand(notificationsSubscribeCmd)
 	notificationsCmd.AddCommand(notificationsUnsubscribeCmd)
+	notificationsCmd.AddCommand(notificationsUpdateCmd)
 	notificationsCmd.AddCommand(notificationsSubscriptionsCmd)
 
 	// List notifications flags (on the parent command)
@@ -151,6 +167,10 @@ func init() {
 	// Unsubscribe flags
 	notificationsUnsubscribeCmd.Flags().BoolVar(&unsubscribeAll, "all", false, "Remove all subscriptions in the grove")
 	notificationsUnsubscribeCmd.Flags().StringVar(&unsubscribeGrove, "grove", "", "Grove to unsubscribe from (used with --all)")
+
+	// Update flags
+	notificationsUpdateCmd.Flags().StringVar(&updateTriggers, "triggers", "", "Comma-separated trigger activities (required)")
+	notificationsUpdateCmd.MarkFlagRequired("triggers")
 
 	// Subscriptions list flags
 	notificationsSubscriptionsCmd.Flags().StringVar(&subscriptionsGrove, "grove", "", "Filter by grove")
@@ -358,6 +378,44 @@ func runNotificationsSubscribe(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Subscribed to %s in grove %s\n", target, groveID)
 	fmt.Printf("  ID:       %s\n", sub.ID)
 	fmt.Printf("  Scope:    %s\n", sub.Scope)
+	fmt.Printf("  Triggers: %s\n", strings.Join(sub.TriggerActivities, ", "))
+	return nil
+}
+
+func runNotificationsUpdate(cmd *cobra.Command, args []string) error {
+	_, client, err := requireHubClient()
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	subID := args[0]
+
+	triggers := strings.Split(updateTriggers, ",")
+	for i := range triggers {
+		triggers[i] = strings.TrimSpace(triggers[i])
+	}
+
+	if len(triggers) == 0 {
+		return fmt.Errorf("--triggers must specify at least one trigger activity")
+	}
+
+	req := &hubclient.UpdateSubscriptionRequest{
+		TriggerActivities: triggers,
+	}
+
+	sub, err := client.Subscriptions().Update(ctx, subID, req)
+	if err != nil {
+		return fmt.Errorf("failed to update subscription: %w", err)
+	}
+
+	if isJSONOutput() {
+		return outputJSON(sub)
+	}
+
+	fmt.Printf("Subscription %s updated.\n", sub.ID)
 	fmt.Printf("  Triggers: %s\n", strings.Join(sub.TriggerActivities, ", "))
 	return nil
 }
