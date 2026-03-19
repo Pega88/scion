@@ -42,8 +42,8 @@ interface Agent {
 }
 
 interface GroveResourceSpec {
-  requests?: { cpu?: string; memory?: string };
-  limits?: { cpu?: string; memory?: string };
+  requests?: { cpu?: string | undefined; memory?: string | undefined };
+  limits?: { cpu?: string | undefined; memory?: string | undefined };
   disk?: string;
 }
 
@@ -52,10 +52,10 @@ interface GroveSettings {
   defaultHarnessConfig?: string | undefined;
   telemetryEnabled?: boolean | null | undefined;
   activeProfile?: string | undefined;
-  defaultMaxTurns?: number;
-  defaultMaxModelCalls?: number;
-  defaultMaxDuration?: string;
-  defaultResources?: GroveResourceSpec;
+  defaultMaxTurns?: number | undefined;
+  defaultMaxModelCalls?: number | undefined;
+  defaultMaxDuration?: string | undefined;
+  defaultResources?: GroveResourceSpec | undefined;
 }
 
 interface HarnessConfigEntry {
