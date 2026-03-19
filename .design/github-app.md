@@ -1,7 +1,7 @@
 # GitHub App Integration for Scion Agents
 
 **Created:** 2026-03-18
-**Status:** Draft / Proposal (Rev 3)
+**Status:** Draft / Proposal (Rev 4)
 **Related:** `hosted/git-groves.md`, `hosted/secrets-gather.md`, `agent-credentials.md`, `hosted/auth/oauth-setup.md`
 
 ---
@@ -178,7 +178,7 @@ GitHub appends `installation_id` and `setup_action` query parameters. The Hub us
 3. Auto-associate matching groves with the installation.
 4. Redirect the user to a confirmation page.
 
-The **webhook** (`installation.created`) also fires, providing a server-to-server confirmation. Both mechanisms (setup URL redirect + webhook) are handled idempotently — either one alone is sufficient, both together provide redundancy.
+The **webhook** (`installation.created`) also fires, providing a server-to-server confirmation. Both mechanisms (setup URL redirect + webhook) are handled idempotently — either one alone is sufficient, both together provide redundancy. The installation record uses `installation_id` as a natural key — creating an already-existing installation is a no-op. Grove matching is also idempotent.
 
 ### 3.3 Credential Resolution
 
@@ -261,6 +261,11 @@ type Grove struct {
     // GitHubPermissions specifies the permissions to request when minting
     // installation tokens for this grove. If nil, the default set is used.
     GitHubPermissions *GitHubTokenPermissions `json:"github_permissions,omitempty"`
+
+    // GitHubAppStatus tracks the current health of the GitHub App integration
+    // for this grove. Updated on token minting attempts, webhook events, and
+    // periodic health checks. See §4.4.
+    GitHubAppStatus *GitHubAppGroveStatus `json:"github_app_status,omitempty"`
 }
 
 type GitHubTokenPermissions struct {
@@ -274,6 +279,85 @@ type GitHubTokenPermissions struct {
 ```
 
 Since groves are 1:1 with a repository, the installation token is always scoped to exactly one repo. The Hub automatically restricts the token to the grove's target repository regardless of whether the installation grants broader access.
+
+### 4.4 Grove GitHub App Health Status
+
+The GitHub App integration for a grove can break in several ways after initial setup: installations get revoked, repos get removed from an installation, app-level permissions get reduced, or the app's private key becomes invalid. The Hub tracks this state per-grove so it can surface actionable information in the UI and degrade gracefully.
+
+```go
+// GitHubAppGroveStatus represents the current health of the GitHub App
+// integration for a specific grove. This is a computed/cached status that
+// the Hub updates on relevant events (token minting, webhooks, health checks).
+type GitHubAppGroveStatus struct {
+    // State is the high-level health state of the integration.
+    State GitHubAppState `json:"state"`
+
+    // ErrorCode classifies the current error, if any. Empty when State is "ok".
+    ErrorCode string `json:"error_code,omitempty"`
+
+    // ErrorMessage is a human-readable description of the issue and remediation.
+    ErrorMessage string `json:"error_message,omitempty"`
+
+    // LastTokenMint records the last successful token minting timestamp.
+    LastTokenMint *time.Time `json:"last_token_mint,omitempty"`
+
+    // LastError records when the current error was first observed.
+    LastError *time.Time `json:"last_error,omitempty"`
+
+    // LastChecked is the timestamp of the last health check or status update.
+    LastChecked time.Time `json:"last_checked"`
+}
+
+type GitHubAppState string
+
+const (
+    // GitHubAppStateOK means the integration is healthy. Tokens can be minted.
+    GitHubAppStateOK GitHubAppState = "ok"
+
+    // GitHubAppStateDegraded means the integration has a non-fatal issue.
+    // Tokens may still be mintable with reduced permissions.
+    GitHubAppStateDegraded GitHubAppState = "degraded"
+
+    // GitHubAppStateError means the integration is broken. Token minting fails.
+    // The grove will fall back to PAT if available.
+    GitHubAppStateError GitHubAppState = "error"
+
+    // GitHubAppStateUnchecked means the integration has not been validated yet
+    // (e.g., just associated, no agent has run).
+    GitHubAppStateUnchecked GitHubAppState = "unchecked"
+)
+```
+
+#### Error Codes
+
+| Code | State | Cause | Remediation |
+|------|-------|-------|-------------|
+| `installation_revoked` | error | Installation deleted on GitHub (webhook or 404 during token mint) | Reinstall the GitHub App for this org/account |
+| `installation_suspended` | error | Org admin suspended the installation | Contact org admin to unsuspend |
+| `repo_not_accessible` | error | Target repo removed from installation's repo list | Add the repo back to the GitHub App installation on GitHub |
+| `permission_denied` | degraded/error | Requested permission exceeds app's registered permissions | Hub admin: update app permissions on GitHub; or grove owner: reduce grove permission config |
+| `token_mint_failed` | error | Generic token minting failure (network, GitHub outage, etc.) | Transient — clears on next successful mint |
+| `private_key_invalid` | error | JWT generation failed (key expired, corrupted, or rotated without Hub update) | Hub admin: update private key configuration |
+| `app_not_found` | error | App ID doesn't match a registered GitHub App (app deleted on GitHub) | Hub admin: re-register or update app configuration |
+
+#### Status Update Triggers
+
+The Hub updates `GitHubAppGroveStatus` on these events:
+
+1. **Token minting (success):** Set state to `ok`, update `LastTokenMint`, clear error fields.
+2. **Token minting (failure):** Classify the GitHub API error response, set appropriate `ErrorCode` and state.
+3. **Webhook events:** `installation.deleted` → `installation_revoked`; `installation.suspend` → `installation_suspended`; `installation_repositories.removed` → check if grove's repo was removed → `repo_not_accessible`.
+4. **Webhook recovery events:** `installation.unsuspend` → clear `installation_suspended` and set to `unchecked` (validated on next token mint); `installation_repositories.added` → check if grove's repo was re-added → clear `repo_not_accessible`.
+5. **Periodic health check (optional):** The Hub can periodically validate installations by calling `GET /app/installations/{id}` and checking repo access. Frequency TBD but should be conservative to avoid rate limit impact.
+6. **App permission sync:** When the Hub syncs app-level permissions from `GET /app`, it proactively validates grove permission configs and sets `permission_denied` on any grove requesting permissions the app no longer has.
+
+#### Fallback Behavior
+
+When the GitHub App status enters `error` state:
+1. The Hub attempts PAT fallback (per credential resolution order in §3.3).
+2. If a PAT is available, the agent starts with the PAT and the UI shows a warning: "Using PAT fallback. GitHub App issue: {error_message}."
+3. If no PAT is available, agent creation fails with a clear error referencing the GitHub App issue.
+4. The grove owner is notified (via Hub notification system) when the status transitions to `error`.
 
 ---
 
@@ -301,11 +385,15 @@ Agent Start                   Hub                          GitHub API
     |                          |                              |
     |                          |<-- token: ghs_xxx (1hr) -----|
     |                          |                              |
+    |                          |-- Update grove status: ok ---|
+    |                          |                              |
     |<-- GITHUB_TOKEN=ghs_xxx-|                              |
     |    (in resolved env)     |                              |
 ```
 
 The minted token is injected as `GITHUB_TOKEN` in the agent's environment — **the agent doesn't know or care whether the token came from a PAT or a GitHub App**. This is key: the credential source is transparent to the agent and harness.
+
+On minting failure, the Hub classifies the error, updates the grove's `GitHubAppStatus`, and falls back to PAT resolution if available (see §4.4).
 
 ### 5.2 Token Refresh — Blended Approach
 
@@ -353,7 +441,15 @@ The `gh` CLI is wrapped by a lightweight script that reads the current token fro
 | `gh` CLI | Background loop + wrapper | `gh` reads token at invocation; wrapper reads fresh file |
 | Custom scripts | Background loop | Any process reading the token file gets a fresh value |
 
-### 5.3 Environment Variables
+### 5.3 Token File Security
+
+The background refresh loop writes fresh tokens to `/tmp/.github-token` (path from `SCION_GITHUB_TOKEN_PATH`). This is the same security posture as `GITHUB_TOKEN` in the environment:
+
+- File permissions: `0600`, owned by the container user.
+- Token expiry: 1 hour maximum.
+- `sciontool` cleans up the token file on agent exit.
+
+### 5.4 Environment Variables
 
 The following environment variables control GitHub App token behavior inside the agent container:
 
@@ -404,11 +500,11 @@ GitHub sends webhooks for installation lifecycle events. The Hub's webhook endpo
 | Event | Hub Action |
 |-------|------------|
 | `installation.created` | Record installation, match to groves by repo |
-| `installation.deleted` | Mark installation as `deleted`, notify affected groves |
-| `installation.suspend` | Mark as `suspended`, affected groves fall back to PAT |
-| `installation.unsuspend` | Mark as `active`, groves resume using app tokens |
+| `installation.deleted` | Mark installation as `deleted`, set affected groves' status to `installation_revoked`, notify grove owners |
+| `installation.suspend` | Mark as `suspended`, set affected groves' status to `installation_suspended`, notify grove owners |
+| `installation.unsuspend` | Mark as `active`, clear suspension status on affected groves |
 | `installation_repositories.added` | Update installation's repo list, check for new grove matches |
-| `installation_repositories.removed` | Update repo list, disassociate affected groves |
+| `installation_repositories.removed` | Update repo list, set `repo_not_accessible` on affected groves, notify grove owners |
 
 **Public-Facing Requirement:** Webhooks require the Hub to be publicly reachable. The Hub config includes a flag:
 
@@ -417,14 +513,35 @@ github_app:
   webhooks_enabled: true  # admin asserts Hub is publicly reachable
 ```
 
-When `webhooks_enabled` is false, the Hub falls back to auto-discovery and manual association. A validation step during setup can optionally verify reachability by registering a test webhook and checking for the ping event.
+When `webhooks_enabled` is false, the Hub falls back to auto-discovery and manual association. Status updates in this mode rely on token minting failures and periodic health checks (§6.5).
+
+**Webhook Reachability Validation:** When configuring the GitHub App in the Hub's Web UI, the setup flow includes a webhook connectivity test:
+
+1. The Hub admin enters the GitHub App configuration (App ID, private key, webhook secret).
+2. The UI initiates a validation step that registers a test webhook ping with GitHub using the app's credentials.
+3. The Hub listens for the incoming `ping` event within a timeout window (30 seconds).
+4. Success: the UI confirms webhook connectivity and enables `webhooks_enabled`.
+5. Failure: the UI warns that webhooks are not reachable, explains the fallback behavior, and allows the admin to proceed with `webhooks_enabled: false`.
+
+This validation is documented in the Hub admin setup guide with troubleshooting steps for common issues (firewall rules, reverse proxy configuration, DNS resolution).
 
 **Revocation Handling:** When an installation is revoked:
-1. The Hub marks the installation as `deleted` (via webhook or 403 during token minting).
-2. Running agents with valid tokens continue until their token expires (up to 1 hour).
-3. Token refresh attempts fail; `sciontool` logs: "GitHub App installation revoked for org 'acme'."
-4. Affected groves fall back to PAT if one is configured, or surface an error status.
-5. The Hub notifies the grove owner.
+1. The Hub marks the installation as `deleted` (via webhook or 403/404 during token minting).
+2. The Hub sets `installation_revoked` on all affected groves' `GitHubAppStatus`.
+3. Running agents with valid tokens continue until their token expires (up to 1 hour).
+4. Token refresh attempts fail; `sciontool` logs: "GitHub App installation revoked for org 'acme'."
+5. Affected groves fall back to PAT if one is configured, or surface an error status.
+6. The Hub notifies the grove owner.
+
+### 6.5 Periodic Health Checks
+
+When webhooks are disabled (or as a supplementary validation even when enabled), the Hub can run periodic health checks to detect installation issues:
+
+1. The Hub iterates over active installations and calls `GET /app/installations/{id}`.
+2. For each installation, it verifies the installation status and repo access.
+3. Discrepancies update the grove's `GitHubAppStatus` accordingly.
+
+**Frequency:** Conservative to avoid rate limit impact. Default: every 6 hours when webhooks are disabled, every 24 hours when webhooks are enabled (as a consistency check). Configurable via Hub settings.
 
 ---
 
@@ -436,11 +553,15 @@ When `webhooks_enabled` is false, the Hub falls back to auto-discovery and manua
 # GitHub App configuration (admin only)
 GET    /api/v1/github-app                          → App config (app ID, status, not the key)
 PUT    /api/v1/github-app                          → Update app config
+POST   /api/v1/github-app/validate-webhooks        → Trigger webhook reachability test
 
 # Installations (auto-managed, read-mostly)
 GET    /api/v1/github-app/installations             → List known installations
 POST   /api/v1/github-app/installations/discover    → Trigger discovery from GitHub API
 GET    /api/v1/github-app/installations/{id}        → Get installation details
+
+# App permission sync (admin)
+POST   /api/v1/github-app/sync-permissions          → Fetch current app permissions from GitHub, validate grove configs
 
 # Grove GitHub settings (in grove settings tab)
 PUT    /api/v1/groves/{id}/github-installation      → Set/override installation for grove
@@ -448,6 +569,7 @@ DELETE /api/v1/groves/{id}/github-installation      → Remove (fall back to PAT
 PUT    /api/v1/groves/{id}/github-permissions        → Set per-grove token permissions
 GET    /api/v1/groves/{id}/github-permissions        → Get current permission config
 DELETE /api/v1/groves/{id}/github-permissions        → Reset to defaults
+GET    /api/v1/groves/{id}/github-status             → Get current GitHub App health status
 
 # Token refresh (called by sciontool inside agent container)
 POST   /api/v1/agents/{id}/refresh-token            → Mint fresh installation token
@@ -463,7 +585,8 @@ The existing agent creation flow (`POST /api/v1/groves/{id}/agents` and the Hub�
 
 1. Check if the grove has a `github_installation_id`.
 2. If yes: mint an installation token (with grove-specific permissions if configured, otherwise defaults) and include it as `GITHUB_TOKEN` in resolved environment.
-3. If no: fall through to existing PAT secret resolution.
+3. On minting failure: update grove's `GitHubAppStatus` with the classified error, then fall through to PAT secret resolution.
+4. If no installation: fall through to existing PAT secret resolution.
 
 This is transparent to the Broker and agent — they always receive a `GITHUB_TOKEN` env var regardless of source.
 
@@ -526,9 +649,34 @@ github_permissions:
 
 If a grove does not have explicit permissions configured, the **default permission set** is used: `Contents: write, Pull Requests: write, Metadata: read`.
 
-**Validation:** The Hub validates that requested grove-level permissions do not exceed the app's registered permissions. If a grove requests `checks: write` but the app was not registered with Checks permission, the configuration is rejected with a clear error.
+**Validation:** The Hub validates that requested grove-level permissions do not exceed the app's registered permissions. If a grove requests `checks: write` but the app was not registered with Checks permission, the configuration is rejected with a clear error. The Hub periodically syncs app-level permissions from `GET /app` to detect drift (see §8.4).
 
-**Web UI:** Grove-level permission settings are managed in the **Grove Settings tab**.
+### 8.4 App Permission Sync
+
+The app's registered permissions can change on GitHub at any time (e.g., the Hub admin removes a permission). The Hub must detect this and proactively flag affected groves.
+
+**Sync mechanism:**
+
+1. **On demand:** The Hub admin triggers `POST /api/v1/github-app/sync-permissions` from the admin page.
+2. **Periodic:** The Hub syncs app permissions as part of the periodic health check (§6.5).
+3. **On grove permission update:** When a grove's permissions are changed, the Hub validates against the latest known app permissions.
+
+**Sync flow:**
+
+```
+1. Hub calls GET /app (using JWT) → returns app's current permissions
+2. Hub compares against its cached app permissions
+3. If permissions were reduced:
+   a. Update cached app permissions
+   b. For each grove with explicit permissions:
+      - If grove requests a permission the app no longer has:
+        - Set grove GitHubAppStatus to "degraded" with error_code "permission_denied"
+        - Include actionable message: "App no longer has '{permission}' permission.
+          Either re-add it on GitHub or update grove permissions."
+4. Hub admin page shows a summary of affected groves
+```
+
+**Web UI:** The Hub admin page shows the app's current registered permissions with a "Sync from GitHub" button. Mismatches are highlighted.
 
 ---
 
@@ -550,13 +698,26 @@ The agent and harness code requires **zero changes**. The credential arrives as 
 
 **Hub Admin Page:**
 - GitHub App configuration (App ID, setup URL to give to GitHub, webhook status).
+- Webhook reachability test button with pass/fail indicator.
 - "Install App" link that directs to the GitHub App's public installation page.
 - Installation list with status indicators (active/suspended/deleted).
-- Webhook connectivity indicator.
+- App permission summary with "Sync from GitHub" button.
+- List of groves with `degraded` or `error` GitHub App status.
 
-**Grove Settings Tab** (grove-level items):
+**Grove Settings Tab — GitHub App Section:**
+
+The grove settings tab includes a dedicated GitHub App section that surfaces the grove's `GitHubAppStatus` with actionable context:
+
+| Status State | UI Display |
+|--------------|------------|
+| **No installation** | "No GitHub App installed." + "Install App" button linking to GitHub. |
+| `unchecked` | "GitHub App configured. Status will be verified on next agent start." (neutral indicator) |
+| `ok` | "GitHub App active." + last successful token mint timestamp. (green indicator) |
+| `degraded` | Warning banner: "{error_message}" + link to remediation (e.g., grove permission settings or Hub admin page). (yellow indicator) |
+| `error` | Error banner: "{error_message}" + remediation steps. If PAT fallback is active, note: "Currently using PAT fallback." (red indicator) |
+
+Additional grove-level items:
 - Credential source indicator (PAT vs GitHub App) with health status.
-- "Install GitHub App" button if no installation is associated (links to GitHub).
 - GitHub token permission configuration.
 - Token refresh status for active agents.
 
@@ -690,6 +851,7 @@ Installation tokens are treated identically to PATs in the security model:
 - Injected as environment variables (same as today).
 - Never logged by `sciontool` (existing sanitization applies). The token file at `SCION_GITHUB_TOKEN_PATH` has permissions `0600`.
 - 1-hour expiry limits blast radius of token theft.
+- `sciontool` cleans up the token file on agent exit.
 
 ### 15.4 Webhook Security
 
@@ -720,19 +882,22 @@ This is comparable to installing any third-party GitHub App (CI systems, code re
 5. Add Hub API: `GET /api/v1/github-app`, `PUT /api/v1/github-app`.
 6. Add `GitHubInstallation` model and store operations.
 7. Add Hub API: `GET/POST /api/v1/github-app/installations`.
-8. Unit tests for JWT generation and token exchange.
+8. Add `GitHubAppGroveStatus` model and store operations.
+9. Unit tests for JWT generation and token exchange.
 
 ### Phase 2: Installation Callback, Grove Association, and Secret Resolution
 
 1. Implement setup URL callback handler (`GET /github-app/setup`).
 2. Implement webhook endpoint (`POST /api/v1/webhooks/github`) with signature verification.
-3. Auto-match installations to groves by repo URL in both callback and webhook handlers.
-4. Add `github_installation_id` and `github_permissions` to Grove model.
-5. Add Hub API: grove GitHub installation and permissions endpoints.
-6. Implement auto-discovery fallback for `scion hub grove create`.
-7. Integrate into secret resolution: when grove has installation, mint token with grove-specific permissions (or defaults).
-8. Transparent injection as `GITHUB_TOKEN` in agent environment.
-9. Integration tests: app install callback → grove association → agent start → git clone.
+3. Implement webhook reachability validation (`POST /api/v1/github-app/validate-webhooks`).
+4. Auto-match installations to groves by repo URL in both callback and webhook handlers.
+5. Add `github_installation_id`, `github_permissions`, and `github_app_status` to Grove model.
+6. Add Hub API: grove GitHub installation, permissions, and status endpoints.
+7. Implement auto-discovery fallback for `scion hub grove create`.
+8. Integrate into secret resolution: when grove has installation, mint token with grove-specific permissions (or defaults).
+9. On minting failure: classify error, update grove status, fall back to PAT.
+10. Transparent injection as `GITHUB_TOKEN` in agent environment.
+11. Integration tests: app install callback → grove association → agent start → git clone.
 
 ### Phase 3: Token Refresh (Blended)
 
@@ -743,52 +908,81 @@ This is comparable to installing any third-party GitHub App (CI systems, code re
 5. Add `SCION_GITHUB_APP_ENABLED`, `SCION_GITHUB_TOKEN_EXPIRY`, and `SCION_GITHUB_TOKEN_PATH` env vars.
 6. Test long-running agents with token refresh across git and gh CLI.
 
-### Phase 4: Web UI and Polish
+### Phase 4: Web UI, Health Monitoring, and Polish
 
-1. Hub admin page: GitHub App configuration, install link, installation list.
-2. Grove settings tab: credential source, permissions, "Install App" button.
+1. Hub admin page: GitHub App configuration, webhook test, install link, installation list, permission sync.
+2. Grove settings tab: GitHub App status section with state indicators and remediation actions.
 3. Grove creation flow with auto-discovery.
-4. Commit attribution configuration (bot/custom/co-authored).
-5. Rate limit monitoring and warning system.
-6. Documentation and key rotation runbook.
+4. Implement app permission sync (`POST /api/v1/github-app/sync-permissions`).
+5. Implement periodic health check loop for installations (§6.5).
+6. Grove owner notifications for status transitions.
+7. Commit attribution configuration (bot/custom/co-authored).
+8. Rate limit monitoring and warning system.
+9. Documentation: setup guide, webhook troubleshooting, key rotation runbook.
 
 ---
 
-## 17. Open Questions
+## 17. Resolved Questions
+
+Items from prior revisions that have been resolved by feedback or design decisions.
 
 ### 17.1 Token File Security in Shared Containers
 
-**Question:** The background refresh loop writes fresh tokens to `/tmp/.github-token`. Is this an acceptable trade-off vs environment-variable-only tokens?
-
-**Consideration:** The file has `0600` permissions and the token expires in 1 hour — same security posture as `GITHUB_TOKEN` in the environment. `sciontool` should clean up the token file on agent exit.
+**Resolution:** The token file at `SCION_GITHUB_TOKEN_PATH` has `0600` permissions and the token expires in 1 hour — same security posture as `GITHUB_TOKEN` in the environment. `sciontool` cleans up the token file on agent exit. Accepted as equivalent risk.
 
 ### 17.2 Webhook Reachability Validation
 
-**Question:** Beyond the admin-asserted `webhooks_enabled` flag, should the Hub validate webhook reachability during setup?
-
-**Leaning:** Yes — register a test webhook with GitHub during app configuration in the Web UI and check for the ping event. This provides a concrete validation step without relying on external probing.
+**Resolution:** Yes — the Hub validates webhook reachability during app configuration in the Web UI by registering a test webhook ping and checking for receipt within a timeout. Documented in the Hub admin setup guide with troubleshooting steps. See §6.4 for details.
 
 ### 17.3 Setup URL vs Webhook Race Condition
 
-**Question:** The setup URL redirect and the `installation.created` webhook may arrive in any order (or one may fail). Both attempt to register the installation and match groves.
-
-**Consideration:** Both handlers must be idempotent. The installation record uses `installation_id` as a natural key — creating an already-existing installation is a no-op. Grove matching is also idempotent. This should be safe but needs explicit testing.
+**Resolution:** Both the setup URL redirect and `installation.created` webhook handlers are idempotent. The installation record uses `installation_id` as a natural key — creating an already-existing installation is a no-op. Grove matching is also idempotent. Accepted as safe.
 
 ### 17.4 Token Permissions Drift
 
-**Question:** What happens when the GitHub App's registered permissions are reduced, but groves still request those permissions?
-
-**Consideration:** GitHub rejects the token request. The Hub should detect this failure, surface a clear error, and periodically sync the app's current permissions from `GET /app` to validate grove configurations proactively.
+**Resolution:** The Hub periodically syncs app permissions from `GET /app` and proactively validates grove configurations. Affected groves are set to `degraded` status with error code `permission_denied` and an actionable message. The Hub admin page shows a permission sync summary. See §8.4.
 
 ### 17.5 Installation Repo Changes After Setup
 
-**Question:** An org admin can modify which repos the GitHub App has access to at any time (via GitHub settings). If they remove a repo that a grove targets, token minting will fail.
-
-**Consideration:** The `installation_repositories.removed` webhook event handles this if webhooks are enabled. Without webhooks, the failure surfaces at token minting time. The Hub should surface a clear error: "Repository 'acme/widgets' is no longer accessible to the GitHub App installation."
+**Resolution:** Handled via `installation_repositories.removed` webhook (when webhooks are enabled) or detected at token minting time (when webhooks are disabled). Affected groves are set to `error` status with error code `repo_not_accessible`. The grove settings page shows the error with remediation guidance. See §4.4 and §6.4.
 
 ---
 
-## 18. References
+## 18. Open Questions
+
+### 18.1 Health Check Frequency and Rate Limit Budget
+
+**Question:** The periodic health check (§6.5) calls GitHub API endpoints for each installation. With many installations, this could consume significant rate limit budget. What's the right default frequency, and should the Hub skip checks for recently-validated installations?
+
+**Leaning:** Default to 6 hours (webhooks disabled) / 24 hours (webhooks enabled). Skip installations that had a successful token mint within the last check interval. Allow per-Hub configuration override.
+
+### 18.2 Grove Status Notification Channel
+
+**Question:** When a grove's GitHub App status transitions to `error`, the Hub notifies the grove owner. What notification channel(s) should be supported? Options: in-app notification only, email, webhook to external system.
+
+**Leaning:** Start with in-app notification (visible on the Hub dashboard and grove settings page). Email and external webhook notifications are future work — they need their own design for the notification subsystem.
+
+### 18.3 Multi-Installation Conflict
+
+**Question:** If two different installations both grant access to the same repository (e.g., the repo owner installs the app on their personal account AND the org also has the app installed), which installation should the grove use?
+
+**Leaning:** Auto-discovery (§6.3) already handles this: "If exactly one match: auto-associate." If multiple matches, the Hub should surface the choice to the grove owner rather than picking arbitrarily. The grove settings page could list available installations and let the owner select.
+
+### 18.4 Status Recovery and Auto-Clear
+
+**Question:** When a grove's GitHub App status is in `error` and the underlying issue is fixed (e.g., the repo is re-added to the installation), how quickly does the status recover? Should the Hub proactively re-check on the next agent start, or wait for the next health check cycle?
+
+**Leaning:** Re-check on agent start. When a grove is in `error` state and an agent is created, the Hub should attempt token minting anyway (rather than immediately falling back to PAT). If it succeeds, clear the error. This provides the fastest recovery path without adding polling overhead.
+
+### 18.5 Webhook Secret Rotation
+
+**Question:** The `webhook_secret` is used to validate incoming GitHub webhooks. How should it be rotated? GitHub doesn't support multiple active webhook secrets simultaneously, so there's a brief window during rotation where webhooks could fail validation.
+
+**Leaning:** Document as a manual rotation procedure: update the secret on GitHub, then immediately update the Hub config. The window is very brief (seconds). During this window, webhook events may be dropped, but the periodic health check provides a safety net. An alternative is to temporarily disable signature validation during rotation, but this trades security for convenience.
+
+---
+
+## 19. References
 
 - **GitHub Docs**: [About GitHub Apps](https://docs.github.com/en/apps/overview)
 - **GitHub Docs**: [Authenticating as a GitHub App](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/about-authentication-with-a-github-app)
