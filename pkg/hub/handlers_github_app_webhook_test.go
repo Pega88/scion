@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -532,6 +533,227 @@ func TestHandleGitHubWebhook_InstallationCreatedIdempotent(t *testing.T) {
 	}
 	if inst.Status != store.GitHubInstallationStatusActive {
 		t.Errorf("expected active, got %s", inst.Status)
+	}
+}
+
+// recordingEventPublisher records calls to PublishGroveUpdated for test assertions.
+type recordingEventPublisher struct {
+	noopEventPublisher
+	mu            sync.Mutex
+	groveUpdates  []*store.Grove
+}
+
+func (r *recordingEventPublisher) PublishGroveUpdated(_ context.Context, grove *store.Grove) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.groveUpdates = append(r.groveUpdates, grove)
+}
+
+func (r *recordingEventPublisher) getGroveUpdates() []*store.Grove {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := make([]*store.Grove, len(r.groveUpdates))
+	copy(result, r.groveUpdates)
+	return result
+}
+
+func TestWebhook_PublishesGroveUpdatedOnInstallationDeleted(t *testing.T) {
+	srv, s := webhookTestServer(t)
+	ctx := context.Background()
+
+	// Replace the event publisher with a recording one
+	recorder := &recordingEventPublisher{}
+	srv.events = recorder
+
+	// Pre-create installation
+	installationID := int64(12345)
+	installation := &store.GitHubInstallation{
+		InstallationID: installationID,
+		AccountLogin:   "acme",
+		AccountType:    "Organization",
+		AppID:          42,
+		Status:         store.GitHubInstallationStatusActive,
+	}
+	if err := s.CreateGitHubInstallation(ctx, installation); err != nil {
+		t.Fatalf("failed to create installation: %v", err)
+	}
+
+	// Create a grove associated with the installation
+	grove := &store.Grove{
+		ID:                   "grove-event-1",
+		Name:                 "Event Test Grove",
+		Slug:                 "event-test-grove",
+		GitRemote:            "https://github.com/acme/widgets.git",
+		GitHubInstallationID: &installationID,
+		GitHubAppStatus:      &store.GitHubAppGroveStatus{State: store.GitHubAppStateOK, LastChecked: time.Now()},
+		Created:              time.Now(),
+		Updated:              time.Now(),
+	}
+	if err := s.CreateGrove(ctx, grove); err != nil {
+		t.Fatalf("failed to create grove: %v", err)
+	}
+
+	payload := mustJSON(t, map[string]interface{}{
+		"action": "deleted",
+		"installation": map[string]interface{}{
+			"id":     12345,
+			"app_id": 42,
+			"account": map[string]interface{}{
+				"login": "acme",
+				"type":  "Organization",
+			},
+		},
+	})
+
+	sig := signWebhookPayload(payload, "test-webhook-secret")
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/github", bytes.NewReader(payload))
+	req.Header.Set("X-GitHub-Event", "installation")
+	req.Header.Set("X-Hub-Signature-256", sig)
+
+	rec := httptest.NewRecorder()
+	srv.handleGitHubWebhook(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	// Verify PublishGroveUpdated was called
+	updates := recorder.getGroveUpdates()
+	if len(updates) != 1 {
+		t.Fatalf("expected 1 grove updated event, got %d", len(updates))
+	}
+	if updates[0].ID != "grove-event-1" {
+		t.Errorf("expected grove ID grove-event-1, got %s", updates[0].ID)
+	}
+	if updates[0].GitHubAppStatus == nil || updates[0].GitHubAppStatus.State != store.GitHubAppStateError {
+		t.Errorf("expected error state in published event, got %v", updates[0].GitHubAppStatus)
+	}
+}
+
+func TestWebhook_PublishesGroveUpdatedOnRepoRemoved(t *testing.T) {
+	srv, s := webhookTestServer(t)
+	ctx := context.Background()
+
+	recorder := &recordingEventPublisher{}
+	srv.events = recorder
+
+	installationID := int64(12345)
+	installation := &store.GitHubInstallation{
+		InstallationID: installationID,
+		AccountLogin:   "acme",
+		AccountType:    "Organization",
+		AppID:          42,
+		Repositories:   []string{"acme/widgets", "acme/api"},
+		Status:         store.GitHubInstallationStatusActive,
+	}
+	if err := s.CreateGitHubInstallation(ctx, installation); err != nil {
+		t.Fatalf("failed to create installation: %v", err)
+	}
+
+	grove := &store.Grove{
+		ID:                   "grove-event-2",
+		Name:                 "Event Test Grove 2",
+		Slug:                 "event-test-grove-2",
+		GitRemote:            "https://github.com/acme/widgets.git",
+		GitHubInstallationID: &installationID,
+		GitHubAppStatus:      &store.GitHubAppGroveStatus{State: store.GitHubAppStateOK, LastChecked: time.Now()},
+		Created:              time.Now(),
+		Updated:              time.Now(),
+	}
+	if err := s.CreateGrove(ctx, grove); err != nil {
+		t.Fatalf("failed to create grove: %v", err)
+	}
+
+	payload := mustJSON(t, map[string]interface{}{
+		"action":       "removed",
+		"installation": map[string]interface{}{"id": 12345},
+		"repositories_removed": []map[string]interface{}{
+			{"id": 1, "full_name": "acme/widgets", "name": "widgets"},
+		},
+		"repositories_added": []map[string]interface{}{},
+	})
+
+	sig := signWebhookPayload(payload, "test-webhook-secret")
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/github", bytes.NewReader(payload))
+	req.Header.Set("X-GitHub-Event", "installation_repositories")
+	req.Header.Set("X-Hub-Signature-256", sig)
+
+	rec := httptest.NewRecorder()
+	srv.handleGitHubWebhook(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	updates := recorder.getGroveUpdates()
+	if len(updates) != 1 {
+		t.Fatalf("expected 1 grove updated event, got %d", len(updates))
+	}
+	if updates[0].ID != "grove-event-2" {
+		t.Errorf("expected grove ID grove-event-2, got %s", updates[0].ID)
+	}
+	if updates[0].GitHubAppStatus == nil || updates[0].GitHubAppStatus.State != store.GitHubAppStateError {
+		t.Errorf("expected error state in published event, got %v", updates[0].GitHubAppStatus)
+	}
+}
+
+func TestWebhook_PublishesGroveUpdatedOnAutoMatch(t *testing.T) {
+	srv, s := webhookTestServer(t)
+	ctx := context.Background()
+
+	recorder := &recordingEventPublisher{}
+	srv.events = recorder
+
+	// Create a grove with a matching git remote but no installation yet
+	grove := &store.Grove{
+		ID:        "grove-event-3",
+		Name:      "Event Test Grove 3",
+		Slug:      "event-test-grove-3",
+		GitRemote: "https://github.com/acme/widgets.git",
+		Created:   time.Now(),
+		Updated:   time.Now(),
+	}
+	if err := s.CreateGrove(ctx, grove); err != nil {
+		t.Fatalf("failed to create grove: %v", err)
+	}
+
+	payload := mustJSON(t, map[string]interface{}{
+		"action": "created",
+		"installation": map[string]interface{}{
+			"id":     12345,
+			"app_id": 42,
+			"account": map[string]interface{}{
+				"login": "acme",
+				"type":  "Organization",
+			},
+			"repository_selection": "selected",
+		},
+		"repositories": []map[string]interface{}{
+			{"id": 1, "full_name": "acme/widgets", "name": "widgets"},
+		},
+	})
+
+	sig := signWebhookPayload(payload, "test-webhook-secret")
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/webhooks/github", bytes.NewReader(payload))
+	req.Header.Set("X-GitHub-Event", "installation")
+	req.Header.Set("X-Hub-Signature-256", sig)
+
+	rec := httptest.NewRecorder()
+	srv.handleGitHubWebhook(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	updates := recorder.getGroveUpdates()
+	if len(updates) != 1 {
+		t.Fatalf("expected 1 grove updated event from auto-match, got %d", len(updates))
+	}
+	if updates[0].ID != "grove-event-3" {
+		t.Errorf("expected grove ID grove-event-3, got %s", updates[0].ID)
+	}
+	if updates[0].GitHubInstallationID == nil || *updates[0].GitHubInstallationID != 12345 {
+		t.Error("expected grove to be associated with installation 12345")
 	}
 }
 
