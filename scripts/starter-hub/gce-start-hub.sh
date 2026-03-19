@@ -164,10 +164,9 @@ SETTINGS_EOF
     substep "Prepared settings.yaml"
 
     # systemd service file
-    BROKER_FLAGS=""
-    if [[ "${ENABLE_GKE}" == "true" ]]; then
-        BROKER_FLAGS=" --enable-runtime-broker --runtime-broker-port 9800"
-    fi
+    # Always enable the runtime broker for combo hub-broker mode.
+    # The runtime (docker vs kubernetes) is controlled by settings.yaml, not this flag.
+    BROKER_FLAGS=" --enable-runtime-broker --runtime-broker-port 9800"
     printf "[Unit]
 Description=Scion Hub API Server
 After=network.target
