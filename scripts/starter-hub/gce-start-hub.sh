@@ -233,6 +233,13 @@ fi
 FULL_REMOTE_COMMANDS=""
 if $FULL_DEPLOY; then
     FULL_REMOTE_COMMANDS='
+    # Ensure build dependencies are present (cloud-init may not have finished)
+    if ! command -v make &>/dev/null; then
+        echo "  -> Installing build dependencies..."
+        sudo apt-get update
+        sudo apt-get install -y make build-essential
+    fi
+
     # Install Caddy if missing
     if ! command -v caddy &>/dev/null; then
         echo "  -> Installing Caddy..."
