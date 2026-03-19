@@ -130,12 +130,16 @@ func TestGetRuntime(t *testing.T) {
 		if err := os.MkdirAll(globalDir, 0755); err != nil {
 			t.Fatal(err)
 		}
-		os.WriteFile(filepath.Join(globalDir, "settings.json"),
-			[]byte(`{"active_profile": "local", "runtimes": {"container": {}}, "profiles": {"local": {"runtime": "container"}}}`), 0644)
+		if err := os.WriteFile(filepath.Join(globalDir, "settings.json"),
+			[]byte(`{"active_profile": "local", "runtimes": {"container": {}}, "profiles": {"local": {"runtime": "container"}}}`), 0644); err != nil {
+			t.Fatal(err)
+		}
 
 		// Grove says docker
-		os.WriteFile(filepath.Join(groveScionDir, "settings.json"),
-			[]byte(`{"active_profile": "local", "runtimes": {"docker": {}}, "profiles": {"local": {"runtime": "docker"}}}`), 0644)
+		if err := os.WriteFile(filepath.Join(groveScionDir, "settings.json"),
+			[]byte(`{"active_profile": "local", "runtimes": {"docker": {}}, "profiles": {"local": {"runtime": "docker"}}}`), 0644); err != nil {
+			t.Fatal(err)
+		}
 
 		r := GetRuntime(groveScionDir, "")
 		if _, ok := r.(*DockerRuntime); !ok {

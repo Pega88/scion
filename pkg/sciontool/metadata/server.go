@@ -91,9 +91,7 @@ type Server struct {
 	cachedIDTokens map[string]*cachedIDToken
 
 	// Singleflight for token fetches
-	fetchMu       sync.Mutex
 	fetchInFlight bool
-	fetchDone     chan struct{}
 
 	cancel             context.CancelFunc
 	iptablesConfigured bool        // whether iptables redirect was successfully set up

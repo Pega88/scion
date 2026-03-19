@@ -19,10 +19,9 @@ import (
 	"time"
 
 	gcplog "cloud.google.com/go/logging"
-	loggingpb "cloud.google.com/go/logging/apiv2/loggingpb"
+	logpb "cloud.google.com/go/logging/apiv2/loggingpb"
 	mrpb "google.golang.org/genproto/googleapis/api/monitoredres"
 	ltype "google.golang.org/genproto/googleapis/logging/type"
-	logpb "google.golang.org/genproto/googleapis/logging/v2"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -295,10 +294,10 @@ func TestLogQueryOptionsTailCapping(t *testing.T) {
 
 func TestConvertProtoLogEntry_TextPayload(t *testing.T) {
 	ts := time.Date(2026, 3, 7, 10, 15, 32, 0, time.UTC)
-	entry := &loggingpb.LogEntry{
+	entry := &logpb.LogEntry{
 		Timestamp: timestamppb.New(ts),
 		Severity:  ltype.LogSeverity_INFO,
-		Payload:   &loggingpb.LogEntry_TextPayload{TextPayload: "Agent started"},
+		Payload:   &logpb.LogEntry_TextPayload{TextPayload: "Agent started"},
 		Labels: map[string]string{
 			"agent_id":  "abc123",
 			"broker_id": "broker-west-1",
@@ -327,14 +326,14 @@ func TestConvertProtoLogEntry_JSONPayload(t *testing.T) {
 		"message":   structpb.NewStringValue("Failed to route"),
 		"subsystem": structpb.NewStringValue("hub.dispatch"),
 	}
-	entry := &loggingpb.LogEntry{
+	entry := &logpb.LogEntry{
 		Timestamp: timestamppb.New(time.Now()),
 		Severity:  ltype.LogSeverity_ERROR,
-		Payload: &loggingpb.LogEntry_JsonPayload{
+		Payload: &logpb.LogEntry_JsonPayload{
 			JsonPayload: &structpb.Struct{Fields: fields},
 		},
 		InsertId: "insert-proto-2",
-		SourceLocation: &loggingpb.LogEntrySourceLocation{
+		SourceLocation: &logpb.LogEntrySourceLocation{
 			File:     "pkg/hub/dispatch.go",
 			Line:     342,
 			Function: "dispatch",
@@ -361,10 +360,10 @@ func TestConvertProtoLogEntry_JSONPayload(t *testing.T) {
 }
 
 func TestConvertProtoLogEntry_Resource(t *testing.T) {
-	entry := &loggingpb.LogEntry{
+	entry := &logpb.LogEntry{
 		Timestamp: timestamppb.New(time.Now()),
 		Severity:  ltype.LogSeverity_INFO,
-		Payload:   &loggingpb.LogEntry_TextPayload{TextPayload: "test"},
+		Payload:   &logpb.LogEntry_TextPayload{TextPayload: "test"},
 		InsertId:  "insert-proto-3",
 		Resource: &mrpb.MonitoredResource{
 			Type: "gce_instance",
