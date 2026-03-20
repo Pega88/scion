@@ -530,13 +530,14 @@ const (
 
 // NotificationSubscription represents a subscription to agent activity changes.
 type NotificationSubscription struct {
-	ID                string    `json:"id"`                // UUID primary key
-	Scope             string    `json:"scope"`             // "agent" or "grove"
-	AgentID           string    `json:"agentId,omitempty"` // Required when Scope="agent", empty when Scope="grove"
-	SubscriberType    string    `json:"subscriberType"`    // "agent" or "user"
-	SubscriberID      string    `json:"subscriberId"`      // Slug or ID of the subscriber
-	GroveID           string    `json:"groveId"`           // Always required (grove context)
-	TriggerActivities []string  `json:"triggerActivities"` // e.g. ["COMPLETED", "WAITING_FOR_INPUT"]
+	ID                string    `json:"id"`                  // UUID primary key
+	Scope             string    `json:"scope"`               // "agent" or "grove"
+	AgentID           string    `json:"agentId,omitempty"`   // Required when Scope="agent", empty when Scope="grove"
+	AgentSlug         string    `json:"agentSlug,omitempty"` // Display-only: resolved agent slug (not persisted)
+	SubscriberType    string    `json:"subscriberType"`      // "agent" or "user"
+	SubscriberID      string    `json:"subscriberId"`        // Slug or ID of the subscriber
+	GroveID           string    `json:"groveId"`             // Always required (grove context)
+	TriggerActivities []string  `json:"triggerActivities"`   // e.g. ["COMPLETED", "WAITING_FOR_INPUT"]
 	CreatedAt         time.Time `json:"createdAt"`
 	CreatedBy         string    `json:"createdBy"`
 }

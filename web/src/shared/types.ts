@@ -575,6 +575,7 @@ export interface Subscription {
   id: string;
   scope: SubscriptionScope;
   agentId?: string;
+  agentSlug?: string;
   subscriberType: string;
   subscriberId: string;
   groveId: string;

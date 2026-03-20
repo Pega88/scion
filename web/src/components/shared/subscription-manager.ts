@@ -38,7 +38,7 @@ interface SubscriptionTemplate {
 }
 
 const DEFAULT_TRIGGERS = ['COMPLETED', 'WAITING_FOR_INPUT', 'LIMITS_EXCEEDED'];
-const ALL_TRIGGERS = ['COMPLETED', 'WAITING_FOR_INPUT', 'LIMITS_EXCEEDED', 'DELETED'];
+const ALL_TRIGGERS = ['COMPLETED', 'WAITING_FOR_INPUT', 'LIMITS_EXCEEDED', 'STALLED', 'ERROR', 'DELETED'];
 
 @customElement('scion-subscription-manager')
 export class ScionSubscriptionManager extends LitElement {
@@ -78,14 +78,20 @@ export class ScionSubscriptionManager extends LitElement {
   }
 
   private async loadSubscriptions(): Promise<void> {
-    if (!this.groveId) return;
     this.loading = true;
     this.error = null;
 
     try {
-      let url = `/api/v1/notifications/subscriptions?groveId=${encodeURIComponent(this.groveId)}`;
+      let url = '/api/v1/notifications/subscriptions';
+      const params: string[] = [];
+      if (this.groveId) {
+        params.push(`groveId=${encodeURIComponent(this.groveId)}`);
+      }
       if (this.agentId) {
-        url += `&agentId=${encodeURIComponent(this.agentId)}`;
+        params.push(`agentId=${encodeURIComponent(this.agentId)}`);
+      }
+      if (params.length > 0) {
+        url += '?' + params.join('&');
       }
       const response = await apiFetch(url);
 
@@ -94,10 +100,14 @@ export class ScionSubscriptionManager extends LitElement {
         throw new Error(errorData.message || `HTTP ${response.status}: ${response.statusText}`);
       }
 
-      const data = (await response.json()) as Subscription[] | { subscriptions?: Subscription[] };
-      this.subscriptions = Array.isArray(data)
-        ? data
-        : (data as { subscriptions?: Subscription[] }).subscriptions || [];
+      const data = (await response.json()) as Subscription[] | { subscriptions?: Subscription[] } | null;
+      if (data == null) {
+        this.subscriptions = [];
+      } else if (Array.isArray(data)) {
+        this.subscriptions = data;
+      } else {
+        this.subscriptions = (data as { subscriptions?: Subscription[] }).subscriptions || [];
+      }
     } catch (err) {
       console.error('Failed to load subscriptions:', err);
       this.error = err instanceof Error ? err.message : 'Failed to load subscriptions';
@@ -283,13 +293,15 @@ export class ScionSubscriptionManager extends LitElement {
       <div class="section compact">
         <div class="section-header">
           <div class="section-header-info">
-            <h2>Notification Subscriptions</h2>
-            <p>Get notified when agents complete, need input, or exceed limits.</p>
+            <h2>Your Notification Subscriptions</h2>
+            <p>Get notified when agents complete, need input, or encounter issues.</p>
           </div>
-          <sl-button size="small" variant="default" @click=${this.openCreateDialog}>
-            <sl-icon slot="prefix" name="bell"></sl-icon>
-            Subscribe
-          </sl-button>
+          ${this.groveId
+            ? html`<sl-button size="small" variant="default" @click=${this.openCreateDialog}>
+                <sl-icon slot="prefix" name="bell"></sl-icon>
+                Subscribe
+              </sl-button>`
+            : nothing}
         </div>
 
         ${this.loading
@@ -306,11 +318,15 @@ export class ScionSubscriptionManager extends LitElement {
                   <div class="empty-state">
                     <sl-icon name="bell-slash"></sl-icon>
                     <h3>No Subscriptions</h3>
-                    <p>Subscribe to get notified about agent activity in this grove.</p>
-                    <sl-button variant="primary" size="small" @click=${this.openCreateDialog}>
-                      <sl-icon slot="prefix" name="bell"></sl-icon>
-                      Subscribe
-                    </sl-button>
+                    <p>${this.groveId
+                      ? 'Subscribe to get notified about agent activity in this grove.'
+                      : 'You have no notification subscriptions. Subscribe from a grove or agent page.'}</p>
+                    ${this.groveId
+                      ? html`<sl-button variant="primary" size="small" @click=${this.openCreateDialog}>
+                          <sl-icon slot="prefix" name="bell"></sl-icon>
+                          Subscribe
+                        </sl-button>`
+                      : nothing}
                   </div>
                 `
               : this.renderTable()}
@@ -391,7 +407,7 @@ export class ScionSubscriptionManager extends LitElement {
     const isDeleting = this.deletingId === sub.id;
     const isEditing = this.editingId === sub.id;
     const target =
-      sub.scope === 'grove' ? '(all agents)' : sub.agentId || '\u2014';
+      sub.scope === 'grove' ? '(all agents)' : sub.agentSlug || sub.agentId || '\u2014';
     const scopeIcon = sub.scope === 'grove' ? 'folder' : 'cpu';
     const triggers = sub.triggerActivities?.join(', ') || '\u2014';
 
@@ -592,6 +608,10 @@ export class ScionSubscriptionManager extends LitElement {
         return 'Waiting for Input';
       case 'LIMITS_EXCEEDED':
         return 'Limits Exceeded';
+      case 'STALLED':
+        return 'Stalled';
+      case 'ERROR':
+        return 'Error';
       case 'DELETED':
         return 'Deleted';
       default:
@@ -607,6 +627,10 @@ export class ScionSubscriptionManager extends LitElement {
         return 'Agent needs human input to continue.';
       case 'LIMITS_EXCEEDED':
         return 'Agent exceeded turn or model call limits.';
+      case 'STALLED':
+        return 'Agent has stalled and is no longer making progress.';
+      case 'ERROR':
+        return 'Agent encountered an error.';
       case 'DELETED':
         return 'Agent was deleted.';
       default:

@@ -47,8 +47,8 @@ const PROFILE_SECTIONS: NavSection[] = [
     ],
   },
   {
-    title: 'Settings',
-    items: [{ path: '/profile/settings', label: 'Settings', icon: 'gear' }],
+    title: 'Notifications',
+    items: [{ path: '/profile/settings', label: 'Notifications & Settings', icon: 'bell' }],
   },
 ];
 

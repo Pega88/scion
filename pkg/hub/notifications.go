@@ -246,6 +246,22 @@ func (nd *NotificationDispatcher) storeAndDispatch(ctx context.Context, sub *sto
 		return
 	}
 
+	// Skip stale status events that predate this subscription. This prevents
+	// retroactive notifications when a new grove-scoped subscription is created
+	// and existing agents' statuses are re-reported.
+	if !sub.CreatedAt.IsZero() {
+		activityTime := agent.LastActivityEvent
+		if activityTime.IsZero() {
+			activityTime = agent.Updated
+		}
+		if !activityTime.IsZero() && activityTime.Before(sub.CreatedAt) {
+			nd.log.Debug("Skipping notification for stale event predating subscription",
+				"subscriptionID", sub.ID, "agentID", evt.AgentID,
+				"activityTime", activityTime, "subscriptionCreatedAt", sub.CreatedAt)
+			return
+		}
+	}
+
 	// Use activity for matching/display; fall back to phase when activity is empty.
 	effectiveStatus := evt.Activity
 	if effectiveStatus == "" {

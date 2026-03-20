@@ -24,6 +24,8 @@
 import { LitElement, html, css, nothing } from 'lit';
 import { customElement, state } from 'lit/decorators.js';
 
+import '../shared/subscription-manager.js';
+
 const STORAGE_KEY = 'scion-push-notifications';
 
 @customElement('scion-page-profile-settings')
@@ -65,6 +67,7 @@ export class ScionPageProfileSettings extends LitElement {
       border: 1px solid var(--scion-border, #e2e8f0);
       border-radius: 0.75rem;
       padding: 1.5rem;
+      margin-bottom: 1.5rem;
     }
 
     .section-title {
@@ -238,8 +241,8 @@ export class ScionPageProfileSettings extends LitElement {
     return html`
       <div class="page-header">
         <div class="page-header-info">
-          <h1>Settings</h1>
-          <p>Configure your Scion experience and notification preferences.</p>
+          <h1>Notifications & Settings</h1>
+          <p>Manage your notification subscriptions and preferences.</p>
         </div>
       </div>
 
@@ -268,6 +271,8 @@ export class ScionPageProfileSettings extends LitElement {
 
         ${this._renderPermissionStatus()}
       </div>
+
+      <scion-subscription-manager compact></scion-subscription-manager>
     `;
   }
 }

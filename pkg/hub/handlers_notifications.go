@@ -251,7 +251,7 @@ func (s *Server) handleSubscriptionRoutes(w http.ResponseWriter, r *http.Request
 		agentID := r.URL.Query().Get("agentId")
 		scope := r.URL.Query().Get("scope")
 
-		var filtered []store.NotificationSubscription
+		filtered := make([]store.NotificationSubscription, 0)
 		for _, sub := range subs {
 			if groveID != "" && sub.GroveID != groveID {
 				continue
@@ -263,6 +263,16 @@ func (s *Server) handleSubscriptionRoutes(w http.ResponseWriter, r *http.Request
 				continue
 			}
 			filtered = append(filtered, sub)
+		}
+
+		// Enrich agent-scoped subscriptions with agent slug for display
+		for i := range filtered {
+			if filtered[i].Scope == store.SubscriptionScopeAgent && filtered[i].AgentID != "" {
+				agent, err := s.store.GetAgent(ctx, filtered[i].AgentID)
+				if err == nil {
+					filtered[i].AgentSlug = agent.Slug
+				}
+			}
 		}
 
 		writeJSON(w, http.StatusOK, filtered)
