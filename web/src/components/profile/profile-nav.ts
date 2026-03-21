@@ -265,22 +265,20 @@ export class ScionProfileNav extends LitElement {
       align-items: center;
       gap: 0.75rem;
       padding: 0.625rem 0.75rem;
-      padding-left: 2.375rem;
       border-radius: 0.5rem;
-      color: var(--scion-text-muted, #64748b);
+      color: var(--scion-text, #1e293b);
       text-decoration: none;
-      font-size: 0.8125rem;
+      font-size: 0.875rem;
       font-weight: 500;
       transition: all 0.15s ease;
     }
 
     .nav-link-external:hover {
       background: var(--scion-bg-subtle, #f1f5f9);
-      color: var(--scion-text, #1e293b);
     }
 
     .nav-link-external sl-icon {
-      font-size: 1rem;
+      font-size: 1.125rem;
       flex-shrink: 0;
     }
 
@@ -373,7 +371,7 @@ export class ScionProfileNav extends LitElement {
                               class="nav-link-external"
                             >
                               <sl-icon name="github"></sl-icon>
-                              <span class="nav-link-text">Configure GitHub App</span>
+                              <span class="nav-link-text">GitHub Application</span>
                               <sl-icon name="box-arrow-up-right" class="external-icon"></sl-icon>
                             </a>
                           </li>
