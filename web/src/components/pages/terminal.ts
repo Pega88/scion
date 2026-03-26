@@ -460,8 +460,18 @@ export class ScionPageTerminal extends LitElement {
     await new Promise((resolve) => requestAnimationFrame(resolve));
     this.fitAddon.fit();
 
-    // Clipboard key bindings — xterm.js inside Shadow DOM needs explicit handling
+    // Clipboard key bindings & CSI u extended keys — xterm.js inside Shadow DOM
+    // needs explicit handling for these since it doesn't natively emit CSI u
+    // sequences for modified keys.
     this.terminal.attachCustomKeyEventHandler((event: KeyboardEvent) => {
+      // Shift+Enter: send CSI u sequence (ESC [ 13 ; 2 u) so that tmux and
+      // inner applications (e.g. claude-code) can distinguish it from plain
+      // Enter.  Without this, xterm.js sends \r for both.
+      if (event.type === 'keydown' && event.key === 'Enter' && event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey) {
+        this.sendData('\x1b[13;2u');
+        return false;
+      }
+
       const isMod = event.ctrlKey || event.metaKey;
 
       // Ctrl/Cmd+C: copy selection if present, otherwise send SIGINT
