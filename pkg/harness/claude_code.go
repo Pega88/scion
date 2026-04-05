@@ -177,7 +177,7 @@ func (c *ClaudeCode) provisionClaudeJSON(agentHome, agentWorkspace string) error
 	containerWorkspace := "/workspace"
 	if err == nil {
 		relWorkspace, err := filepath.Rel(repoRoot, agentWorkspace)
-		if err == nil && !strings.HasPrefix(relWorkspace, "..") {
+		if err == nil && !strings.HasPrefix(relWorkspace, "..") && relWorkspace != "." {
 			containerWorkspace = filepath.Join("/repo-root", relWorkspace)
 		}
 	}

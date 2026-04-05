@@ -250,6 +250,24 @@ func TestBuildCommonRunArgs(t *testing.T) {
 			},
 		},
 		{
+			name: "shared workspace (workspace equals repo root)",
+			config: RunConfig{
+				Harness:      &harness.GeminiCLI{},
+				Name:         "test-agent",
+				UnixUsername: "scion",
+				RepoRoot:     "/home/user/repo",
+				Workspace:    "/home/user/repo",
+				Image:        "scion-agent:latest",
+			},
+			wantIn: []string{
+				"-v /home/user/repo:/workspace",
+				"--workdir /workspace",
+			},
+			wantOut: []string{
+				"/repo-root",
+			},
+		},
+		{
 			name: "generic volumes",
 			config: RunConfig{
 				Harness: &harness.GeminiCLI{},
@@ -888,6 +906,12 @@ func TestResolveContainerWorkspace(t *testing.T) {
 		{
 			name:      "workspace without repo root",
 			workspace: "/some/workspace",
+			want:      "/workspace",
+		},
+		{
+			name:      "workspace equals repo root (shared workspace)",
+			repoRoot:  "/home/user/myproject",
+			workspace: "/home/user/myproject",
 			want:      "/workspace",
 		},
 	}

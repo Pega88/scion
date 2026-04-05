@@ -61,7 +61,7 @@ func ResolveContainerWorkspace(repoRoot, workspace string, gitClone *api.GitClon
 	}
 	if repoRoot != "" {
 		relWorkspace, err := filepath.Rel(repoRoot, workspace)
-		if err == nil && !strings.HasPrefix(relWorkspace, "..") {
+		if err == nil && !strings.HasPrefix(relWorkspace, "..") && relWorkspace != "." {
 			return filepath.Join("/repo-root", relWorkspace)
 		}
 	}
@@ -180,13 +180,18 @@ func buildCommonRunArgs(config RunConfig) ([]string, error) {
 		addArg("--workdir", "/workspace")
 	} else if config.RepoRoot != "" && config.Workspace != "" {
 		relWorkspace, err := filepath.Rel(config.RepoRoot, config.Workspace)
-		if err == nil && !strings.HasPrefix(relWorkspace, "..") {
-			// Mount .git
+		if err == nil && !strings.HasPrefix(relWorkspace, "..") && relWorkspace != "." {
+			// Worktree case: workspace is a subdirectory of repo root.
+			// Mount .git separately and workspace at its relative path.
 			registerMount(filepath.Join(config.RepoRoot, ".git"), "/repo-root/.git", false, true)
-			// Mount workspace at same relative path
 			containerWorkspace := filepath.Join("/repo-root", relWorkspace)
 			registerMount(config.Workspace, containerWorkspace, false, true)
 			addArg("--workdir", containerWorkspace)
+		} else if relWorkspace == "." {
+			// Shared workspace: workspace IS the repo root (e.g., shared git clone).
+			// Mount directly to /workspace so harnesses can trust a single path.
+			registerMount(config.Workspace, "/workspace", false, true)
+			addArg("--workdir", "/workspace")
 		} else {
 			// Fallback if workspace is outside repo root or relative path is not straightforward.
 			// Still mount RepoRoot so that .git worktree pointers can potentially be resolved if
