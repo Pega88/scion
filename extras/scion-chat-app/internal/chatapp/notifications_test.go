@@ -3,8 +3,11 @@ package chatapp
 import (
 	"context"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/GoogleCloudPlatform/scion/extras/scion-chat-app/internal/state"
 	"github.com/GoogleCloudPlatform/scion/pkg/messages"
 )
 
@@ -50,5 +53,97 @@ func TestHandleBrokerMessage_IgnoredTopics(t *testing.T) {
 				t.Errorf("expected nil error for ignored topic %q, got: %v", topic, err)
 			}
 		})
+	}
+}
+
+// fakeMessenger records SendCard calls for test assertions.
+type fakeMessenger struct {
+	cards []sentCard
+}
+
+type sentCard struct {
+	spaceID string
+	card    Card
+}
+
+func (f *fakeMessenger) SendCard(_ context.Context, spaceID string, card Card) (string, error) {
+	f.cards = append(f.cards, sentCard{spaceID: spaceID, card: card})
+	return "msg-1", nil
+}
+
+func (f *fakeMessenger) SendMessage(context.Context, SendMessageRequest) (string, error) {
+	return "", nil
+}
+func (f *fakeMessenger) UpdateMessage(context.Context, string, SendMessageRequest) error { return nil }
+func (f *fakeMessenger) OpenDialog(context.Context, string, Dialog) error                { return nil }
+func (f *fakeMessenger) UpdateDialog(context.Context, string, Dialog) error              { return nil }
+func (f *fakeMessenger) GetUser(context.Context, string) (*ChatUser, error)              { return nil, nil }
+func (f *fakeMessenger) SetAgentIdentity(context.Context, AgentIdentity) error           { return nil }
+
+// newTestStore creates an ephemeral SQLite store in a temp directory.
+func newTestStore(t *testing.T) *state.Store {
+	t.Helper()
+	dir := t.TempDir()
+	s, err := state.New(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatalf("creating test store: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+	return s
+}
+
+// TestHandleUserMessage_NoSubscriptionRequired verifies that a direct message
+// from an agent to a user is delivered even when the user has zero subscriptions.
+func TestHandleUserMessage_NoSubscriptionRequired(t *testing.T) {
+	store := newTestStore(t)
+
+	// Seed a user mapping and a space link but NO subscriptions.
+	if err := store.SetUserMapping(&state.UserMapping{
+		PlatformUserID: "users/12345",
+		Platform:       "googlechat",
+		HubUserID:      "hub-user-1",
+		HubUserEmail:   "test@example.com",
+		RegisteredBy:   "auto",
+	}); err != nil {
+		t.Fatalf("setting user mapping: %v", err)
+	}
+
+	if err := store.SetSpaceLink(&state.SpaceLink{
+		SpaceID:   "spaces/AAQAx",
+		Platform:  "googlechat",
+		GroveID:   "grove-abc",
+		GroveSlug: "my-grove",
+		LinkedBy:  "test",
+	}); err != nil {
+		t.Fatalf("setting space link: %v", err)
+	}
+
+	fm := &fakeMessenger{}
+	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	relay := NewNotificationRelay(store, fm, log)
+
+	msg := &messages.StructuredMessage{
+		Sender:      "agent:simon",
+		RecipientID: "hub-user-1",
+		Msg:         "Here is the answer to your question.",
+		Type:        messages.TypeInstruction,
+	}
+
+	err := relay.HandleBrokerMessage(context.Background(),
+		"scion.grove.grove-abc.user.hub-user-1.messages", msg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(fm.cards) == 0 {
+		t.Fatal("expected at least one card to be sent, got none — direct messages must not require subscriptions")
+	}
+
+	got := fm.cards[0]
+	if got.spaceID != "spaces/AAQAx" {
+		t.Errorf("card sent to wrong space: got %q, want %q", got.spaceID, "spaces/AAQAx")
+	}
+	if got.card.Header.Title != "Message from simon" {
+		t.Errorf("unexpected card title: %q", got.card.Header.Title)
 	}
 }

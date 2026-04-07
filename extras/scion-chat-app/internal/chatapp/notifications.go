@@ -61,7 +61,8 @@ func (n *NotificationRelay) HandleBrokerMessage(ctx context.Context, topic strin
 	switch {
 	case parts[0] == "grove" && len(parts) >= 5 && parts[2] == "user":
 		// User-targeted message: "grove.<groveID>.user.<userID>.messages"
-		return n.handleUserMessage(ctx, msg)
+		groveID := parts[1]
+		return n.handleUserMessage(ctx, groveID, msg)
 
 	case parts[0] == "grove" && len(parts) >= 4:
 		groveID := parts[1]
@@ -117,8 +118,10 @@ func (n *NotificationRelay) handleAgentNotification(ctx context.Context, groveID
 
 // handleUserMessage relays a user-targeted message to chat.
 // It maps the Hub user ID (RecipientID) back to a chat platform user and delivers
-// the message to all spaces linked to the grove.
-func (n *NotificationRelay) handleUserMessage(ctx context.Context, msg *messages.StructuredMessage) error {
+// the message to all spaces linked to the grove. Direct messages from agents do
+// not require the user to have any subscriptions — subscriptions only control
+// @mentions in agent notification broadcasts.
+func (n *NotificationRelay) handleUserMessage(ctx context.Context, groveID string, msg *messages.StructuredMessage) error {
 	if msg.RecipientID == "" {
 		n.log.Debug("user message has no recipient ID, skipping relay")
 		return nil
@@ -136,39 +139,20 @@ func (n *NotificationRelay) handleUserMessage(ctx context.Context, msg *messages
 		return nil
 	}
 
-	// Check if the user has subscriptions (relay is toggleable per user)
-	subs, err := n.store.ListUserSubscriptions(mapping.PlatformUserID, mapping.Platform)
-	if err != nil {
-		return fmt.Errorf("listing user subscriptions: %w", err)
-	}
-	if len(subs) == 0 {
-		n.log.Debug("user has no subscriptions, skipping message relay",
-			"hub_user_id", msg.RecipientID,
-			"platform_user_id", mapping.PlatformUserID,
-		)
-		return nil
-	}
-
 	// Extract agent identity from sender
 	agentSlug := msg.Sender
 	if idx := strings.Index(agentSlug, ":"); idx >= 0 {
 		agentSlug = agentSlug[idx+1:]
 	}
 
-	// Find spaces linked to groves the user is subscribed to
+	// Find spaces linked to the grove from the message topic
 	links, err := n.store.ListSpaceLinks()
 	if err != nil {
 		return fmt.Errorf("listing space links: %w", err)
 	}
 
-	// Build a set of grove IDs the user is subscribed to
-	subGroves := make(map[string]bool)
-	for _, sub := range subs {
-		subGroves[sub.GroveID] = true
-	}
-
 	for _, link := range links {
-		if !subGroves[link.GroveID] || link.Platform != mapping.Platform {
+		if link.GroveID != groveID || link.Platform != mapping.Platform {
 			continue
 		}
 
