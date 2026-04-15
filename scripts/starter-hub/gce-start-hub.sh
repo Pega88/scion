@@ -356,8 +356,8 @@ POLKIT_EOF
 scion ALL=(root) NOPASSWD: /usr/bin/install -m 755 /home/scion/scion/scion.rebuild /usr/local/bin/scion
 SUDOERS_EOF
     if ! diff -q /tmp/scion-install-binary "$SUDOERS_RULE" >/dev/null 2>&1; then
-        sudo mv /tmp/scion-install-binary "$SUDOERS_RULE"
-        sudo chmod 440 "$SUDOERS_RULE"
+        sudo install -m 440 -o root -g root /tmp/scion-install-binary "$SUDOERS_RULE"
+        rm -f /tmp/scion-install-binary
         echo "  -> Sudoers rule installed (scion user can install rebuilt binary)"
     else
         rm -f /tmp/scion-install-binary
