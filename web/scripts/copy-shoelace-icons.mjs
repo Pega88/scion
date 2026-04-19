@@ -59,6 +59,8 @@ const USED_ICONS = [
   'check-lg',
   'circle',
   'circle-fill',
+  'clipboard',
+  'clipboard-check',
   'clock',
   'clock-history',
   'code',

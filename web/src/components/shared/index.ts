@@ -45,3 +45,4 @@ export type { FileEditorDataSource, FileContentResponse } from './file-editor.js
 export { ScionGCPServiceAccountList } from './gcp-service-account-list.js';
 export { ScionSubscriptionManager } from './subscription-manager.js';
 export { ScionGitRemoteDisplay } from './git-remote-display.js';
+export { ScionHashDisplay } from './hash-display.js';

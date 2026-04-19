@@ -34,6 +34,7 @@ import { TemplateFileBrowserDataSource } from '../shared/file-browser.js';
 import type { FileBrowserDataSource } from '../shared/file-browser.js';
 import { TemplateFileEditorDataSource } from '../shared/file-editor.js';
 import type { FileEditorDataSource } from '../shared/file-editor.js';
+import '../shared/hash-display.js';
 
 @customElement('scion-page-template-detail')
 export class ScionPageTemplateDetail extends LitElement {
@@ -125,6 +126,12 @@ export class ScionPageTemplateDetail extends LitElement {
       margin-top: 0.5rem;
       font-size: 0.75rem;
       color: var(--sl-color-neutral-500);
+    }
+    .template-meta-row .hash-meta {
+      display: inline-flex;
+      align-items: baseline;
+      gap: 0.25rem;
+      min-width: 0;
     }
 
     .files-section {
@@ -263,7 +270,9 @@ export class ScionPageTemplateDetail extends LitElement {
         <div class="template-meta-row">
           <span>Scope: ${t.scope}</span>
           <span>Status: ${t.status}</span>
-          ${t.contentHash ? html`<span title=${t.contentHash}>Hash: ${t.contentHash.substring(0, 15)}…</span>` : ''}
+          ${t.contentHash
+            ? html`<span class="hash-meta">Hash: <scion-hash-display .hash=${t.contentHash} max-width="14ch"></scion-hash-display></span>`
+            : ''}
         </div>
       </div>
     `;

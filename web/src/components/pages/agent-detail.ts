@@ -55,6 +55,7 @@ import '../shared/agent-log-viewer.js';
 import type { ScionAgentLogViewer } from '../shared/agent-log-viewer.js';
 import '../shared/agent-message-viewer.js';
 import type { ScionAgentMessageViewer } from '../shared/agent-message-viewer.js';
+import '../shared/hash-display.js';
 
 /**
  * Parse a Go-style duration string (e.g. "2h30m", "1h", "45m", "90s") into
@@ -1369,7 +1370,9 @@ export class ScionPageAgentDetail extends LitElement {
             ? html`
                 <div class="info-item">
                   <span class="info-label">Template Hash</span>
-                  <span class="info-value mono">${cfg.templateHash}</span>
+                  <span class="info-value mono">
+                    <scion-hash-display .hash=${cfg.templateHash} max-width="14ch"></scion-hash-display>
+                  </span>
                 </div>
               `
             : ''}
