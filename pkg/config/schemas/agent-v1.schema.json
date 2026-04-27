@@ -55,6 +55,11 @@
       "type": "array",
       "items": { "$ref": "#/$defs/serviceSpec" }
     },
+    "mcp_servers": {
+      "type": "object",
+      "description": "Universal harness-agnostic MCP server configuration. Each key is a server name; the value describes its transport and parameters. The container-side harness provisioner translates these into the harness's native MCP config format.",
+      "additionalProperties": { "$ref": "#/$defs/mcpServerConfig" }
+    },
     "image": {
       "type": "string",
       "description": "Override container image."
@@ -213,6 +218,75 @@
           }
         }
       }
+    },
+    "mcpServerConfig": {
+      "type": "object",
+      "required": ["transport"],
+      "description": "Universal MCP server entry. Field rules: transport=stdio requires command and forbids url/headers; transport=sse|streamable-http requires url and forbids command/args/env.",
+      "properties": {
+        "transport": {
+          "type": "string",
+          "enum": ["stdio", "sse", "streamable-http"],
+          "description": "MCP transport protocol."
+        },
+        "command": {
+          "type": "string",
+          "description": "Executable to launch (stdio only)."
+        },
+        "args": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Command-line arguments (stdio only)."
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Environment variables passed to the MCP process (stdio only). Values support ${VAR_NAME} interpolation."
+        },
+        "url": {
+          "type": "string",
+          "description": "Server endpoint URL (sse and streamable-http only). Supports ${VAR_NAME} interpolation."
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "HTTP headers (sse and streamable-http only). Values support ${VAR_NAME} interpolation."
+        },
+        "scope": {
+          "type": "string",
+          "enum": ["global", "project"],
+          "default": "global",
+          "description": "Whether to register the server globally for the agent or scoped to its workspace project. Harnesses that do not distinguish project scope (Gemini, OpenCode) treat 'project' as 'global'."
+        }
+      },
+      "additionalProperties": false,
+      "oneOf": [
+        {
+          "properties": {
+            "transport": { "const": "stdio" }
+          },
+          "required": ["command"],
+          "not": {
+            "anyOf": [
+              { "required": ["url"] },
+              { "required": ["headers"] }
+            ]
+          }
+        },
+        {
+          "properties": {
+            "transport": { "enum": ["sse", "streamable-http"] }
+          },
+          "required": ["url"],
+          "not": {
+            "anyOf": [
+              { "required": ["command"] },
+              { "required": ["args"] },
+              { "required": ["env"] }
+            ]
+          }
+        }
+      ]
     },
     "requiredSecret": {
       "type": "object",

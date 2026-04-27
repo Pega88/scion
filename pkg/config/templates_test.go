@@ -778,6 +778,102 @@ func TestMergeScionConfigServices(t *testing.T) {
 	})
 }
 
+func TestMergeScionConfigMCPServers(t *testing.T) {
+	t.Run("override merges by key with base", func(t *testing.T) {
+		base := &api.ScionConfig{
+			MCPServers: map[string]api.MCPServerConfig{
+				"a": {Transport: api.MCPTransportStdio, Command: "a-cmd"},
+				"b": {Transport: api.MCPTransportStdio, Command: "b-cmd"},
+			},
+		}
+		override := &api.ScionConfig{
+			MCPServers: map[string]api.MCPServerConfig{
+				"b": {Transport: api.MCPTransportStdio, Command: "b-override"},
+				"c": {Transport: api.MCPTransportStdio, Command: "c-cmd"},
+			},
+		}
+		result := MergeScionConfig(base, override)
+		if len(result.MCPServers) != 3 {
+			t.Fatalf("expected 3 entries, got %d", len(result.MCPServers))
+		}
+		if result.MCPServers["a"].Command != "a-cmd" {
+			t.Errorf("expected base 'a' preserved, got %q", result.MCPServers["a"].Command)
+		}
+		if result.MCPServers["b"].Command != "b-override" {
+			t.Errorf("expected override 'b', got %q", result.MCPServers["b"].Command)
+		}
+		if result.MCPServers["c"].Command != "c-cmd" {
+			t.Errorf("expected override 'c', got %q", result.MCPServers["c"].Command)
+		}
+	})
+
+	t.Run("nil override preserves base", func(t *testing.T) {
+		base := &api.ScionConfig{
+			MCPServers: map[string]api.MCPServerConfig{
+				"a": {Transport: api.MCPTransportStdio, Command: "a-cmd"},
+			},
+		}
+		override := &api.ScionConfig{}
+		result := MergeScionConfig(base, override)
+		if len(result.MCPServers) != 1 || result.MCPServers["a"].Command != "a-cmd" {
+			t.Errorf("expected base preserved, got %v", result.MCPServers)
+		}
+	})
+
+	t.Run("base nil, override sets", func(t *testing.T) {
+		base := &api.ScionConfig{}
+		override := &api.ScionConfig{
+			MCPServers: map[string]api.MCPServerConfig{
+				"a": {Transport: api.MCPTransportStdio, Command: "a-cmd"},
+			},
+		}
+		result := MergeScionConfig(base, override)
+		if len(result.MCPServers) != 1 || result.MCPServers["a"].Command != "a-cmd" {
+			t.Errorf("expected override set, got %v", result.MCPServers)
+		}
+	})
+}
+
+func TestLoadConfigMCPServers(t *testing.T) {
+	tmp := t.TempDir()
+	good := filepath.Join(tmp, "scion-agent.yaml")
+	if err := os.WriteFile(good, []byte(`schema_version: "1"
+mcp_servers:
+  chrome-devtools:
+    transport: stdio
+    command: chrome-devtools-mcp
+    args: ["--headless"]
+  remote_api:
+    transport: sse
+    url: "http://localhost:8080/mcp/sse"
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	tpl := &Template{Path: tmp}
+	cfg, err := tpl.LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	if cfg.MCPServers["chrome-devtools"].Command != "chrome-devtools-mcp" {
+		t.Errorf("expected chrome-devtools command, got %q", cfg.MCPServers["chrome-devtools"].Command)
+	}
+	if cfg.MCPServers["remote_api"].URL != "http://localhost:8080/mcp/sse" {
+		t.Errorf("expected remote_api URL, got %q", cfg.MCPServers["remote_api"].URL)
+	}
+
+	bad := filepath.Join(tmp, "scion-agent.yaml")
+	if err := os.WriteFile(bad, []byte(`schema_version: "1"
+mcp_servers:
+  bad:
+    transport: stdio
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tpl.LoadConfig(); err == nil || !strings.Contains(err.Error(), "requires command") {
+		t.Errorf("expected stdio-without-command validation error, got: %v", err)
+	}
+}
+
 func TestValidateAgnosticTemplate_RejectsHarnessField(t *testing.T) {
 	cfg := &api.ScionConfig{Harness: "claude"}
 	err := ValidateAgnosticTemplate(cfg)

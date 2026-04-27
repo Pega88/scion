@@ -81,3 +81,13 @@ type AuthSettingsApplier interface {
 type TelemetrySettingsApplier interface {
 	ApplyTelemetrySettings(agentHome string, telemetry *TelemetryConfig, env map[string]string) error
 }
+
+// MCPSettingsApplier is an optional interface that harnesses can implement to
+// stage or apply universal MCP server config (defined once in scion-agent.yaml's
+// mcp_servers block) into the harness's native MCP configuration. Container-script
+// harnesses stage inputs/mcp-servers.json for the in-container provision.py to
+// translate; built-in harnesses without script provisioners do not implement
+// this interface and continue using inline MCP config in their home/ files.
+type MCPSettingsApplier interface {
+	ApplyMCPSettings(agentHome string, mcpServers map[string]MCPServerConfig) error
+}

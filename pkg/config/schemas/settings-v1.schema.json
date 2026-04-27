@@ -317,10 +317,45 @@
           "$ref": "#/$defs/harnessAuthMetadata",
           "description": "Declarative auth preflight metadata for broker and hosted dispatch."
         },
+        "mcp": {
+          "$ref": "#/$defs/harnessMCPMapping",
+          "description": "Declarative mapping for translating universal mcp_servers into the harness's native MCP config (used by scion_harness.apply_mcp_servers_simple). Harnesses with bespoke MCP formats (e.g. OpenCode) leave this empty and translate themselves in provision.py."
+        },
         "dialect": {
           "type": "object",
           "description": "Optional hook dialect metadata.",
           "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "harnessMCPMapping": {
+      "type": "object",
+      "properties": {
+        "global_config_file": {
+          "type": "string",
+          "description": "Agent-home-relative path to the file holding global-scope MCP entries (e.g. '.claude.json')."
+        },
+        "global_config_path": {
+          "type": "string",
+          "description": "Dotted JSON path inside global_config_file where the per-name MCP map lives (e.g. 'mcpServers')."
+        },
+        "project_config_file": {
+          "type": "string",
+          "description": "Agent-home-relative path for project-scope MCP entries; may be the same file as global_config_file."
+        },
+        "project_config_path": {
+          "type": "string",
+          "description": "Dotted JSON path for project-scope MCP entries; may include '{workspace}' which is substituted with the agent_workspace path."
+        },
+        "transport_field": {
+          "type": "string",
+          "description": "Field name in the native server object that holds the transport identifier (e.g. 'type')."
+        },
+        "transport_map": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "description": "Maps universal transport values (stdio/sse/streamable-http) to the native value."
         }
       },
       "additionalProperties": false
@@ -419,6 +454,16 @@
             "auth_file": { "$ref": "#/$defs/capabilityField" },
             "oauth_token": { "$ref": "#/$defs/capabilityField" },
             "vertex_ai": { "$ref": "#/$defs/capabilityField" }
+          },
+          "additionalProperties": false
+        },
+        "mcp": {
+          "type": "object",
+          "properties": {
+            "stdio": { "$ref": "#/$defs/capabilityField" },
+            "sse": { "$ref": "#/$defs/capabilityField" },
+            "streamable_http": { "$ref": "#/$defs/capabilityField" },
+            "project_scope": { "$ref": "#/$defs/capabilityField" }
           },
           "additionalProperties": false
         }

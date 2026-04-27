@@ -555,6 +555,7 @@ type HarnessConfigEntry struct {
 	EnvTemplate      map[string]string                `json:"env_template,omitempty" yaml:"env_template,omitempty" koanf:"env_template"`
 	Capabilities     *api.HarnessAdvancedCapabilities `json:"capabilities,omitempty" yaml:"capabilities,omitempty" koanf:"capabilities"`
 	Auth             *HarnessAuthMetadata             `json:"auth,omitempty" yaml:"auth,omitempty" koanf:"auth"`
+	MCP              *HarnessMCPConfig                `json:"mcp,omitempty" yaml:"mcp,omitempty" koanf:"mcp"`
 	Dialect          map[string]interface{}           `json:"dialect,omitempty" yaml:"dialect,omitempty" koanf:"dialect"`
 }
 
@@ -624,6 +625,34 @@ type HarnessAuthFileRequirement struct {
 type HarnessAuthAutodetect struct {
 	Env   map[string]string `json:"env,omitempty" yaml:"env,omitempty" koanf:"env"`
 	Files map[string]string `json:"files,omitempty" yaml:"files,omitempty" koanf:"files"`
+}
+
+// HarnessMCPConfig is the declarative mapping that lets a harness's
+// container-side provisioner translate the universal mcp_servers map into the
+// harness's native MCP config without bespoke per-harness Python. Used by
+// the scion_harness.apply_mcp_servers_simple helper. Harnesses whose native
+// format does not fit the simple-merge pattern (e.g. OpenCode) leave this
+// empty and translate themselves in provision.py.
+type HarnessMCPConfig struct {
+	// GlobalConfigFile is the agent-home-relative path to the file that holds
+	// global-scope MCP entries (e.g. ".claude.json").
+	GlobalConfigFile string `json:"global_config_file,omitempty" yaml:"global_config_file,omitempty" koanf:"global_config_file"`
+	// GlobalConfigPath is the dotted JSON path inside GlobalConfigFile where
+	// the per-name MCP map lives (e.g. "mcpServers").
+	GlobalConfigPath string `json:"global_config_path,omitempty" yaml:"global_config_path,omitempty" koanf:"global_config_path"`
+	// ProjectConfigFile and ProjectConfigPath are the same for project-scope
+	// servers; the path may include "{workspace}" which is substituted with
+	// the agent_workspace path.
+	ProjectConfigFile string `json:"project_config_file,omitempty" yaml:"project_config_file,omitempty" koanf:"project_config_file"`
+	ProjectConfigPath string `json:"project_config_path,omitempty" yaml:"project_config_path,omitempty" koanf:"project_config_path"`
+	// TransportField is the field name in the native server object that holds
+	// the transport identifier (e.g. "type" for Claude/Gemini).
+	TransportField string `json:"transport_field,omitempty" yaml:"transport_field,omitempty" koanf:"transport_field"`
+	// TransportMap maps universal transport values to the native value, e.g.
+	//   stdio: stdio
+	//   sse: sse
+	//   streamable-http: streamable-http
+	TransportMap map[string]string `json:"transport_map,omitempty" yaml:"transport_map,omitempty" koanf:"transport_map"`
 }
 
 // V1HarnessOverride defines a harness override entry in versioned settings.

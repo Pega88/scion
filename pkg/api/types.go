@@ -49,6 +49,110 @@ type ReadyCheck struct {
 	Timeout string `json:"timeout" yaml:"timeout"` // max wait before giving up
 }
 
+// MCPTransport identifies the transport protocol an MCP server uses.
+type MCPTransport string
+
+const (
+	MCPTransportStdio          MCPTransport = "stdio"
+	MCPTransportSSE            MCPTransport = "sse"
+	MCPTransportStreamableHTTP MCPTransport = "streamable-http"
+)
+
+// MCPScope identifies whether an MCP server is registered globally or per-project
+// in the harness's native config. Harnesses that do not distinguish project
+// scope (Gemini, OpenCode) treat "project" as "global".
+type MCPScope string
+
+const (
+	MCPScopeGlobal  MCPScope = "global"
+	MCPScopeProject MCPScope = "project"
+)
+
+// MCPServerConfig is the universal, harness-agnostic MCP server description.
+// Template authors define MCP servers once in scion-agent.yaml's mcp_servers
+// block; the container-side provisioner translates this into each harness's
+// native format (.claude.json, .gemini/settings.json, opencode.json, etc.).
+type MCPServerConfig struct {
+	Transport MCPTransport      `json:"transport" yaml:"transport"`
+	Command   string            `json:"command,omitempty" yaml:"command,omitempty"`
+	Args      []string          `json:"args,omitempty" yaml:"args,omitempty"`
+	Env       map[string]string `json:"env,omitempty" yaml:"env,omitempty"`
+	URL       string            `json:"url,omitempty" yaml:"url,omitempty"`
+	Headers   map[string]string `json:"headers,omitempty" yaml:"headers,omitempty"`
+	Scope     MCPScope          `json:"scope,omitempty" yaml:"scope,omitempty"`
+}
+
+// ValidateMCPServers validates an MCP server map per the rules in
+// .design/template-mcp-servers.md.
+func ValidateMCPServers(servers map[string]MCPServerConfig) error {
+	for name, srv := range servers {
+		if name == "" {
+			return fmt.Errorf("mcp_servers: empty server name")
+		}
+		if !isValidMCPName(name) {
+			return fmt.Errorf("mcp_servers[%q]: invalid name (must be alphanumeric with hyphens or underscores)", name)
+		}
+		switch srv.Transport {
+		case MCPTransportStdio:
+			if srv.Command == "" {
+				return fmt.Errorf("mcp_servers[%q]: transport %q requires command", name, srv.Transport)
+			}
+			if srv.URL != "" {
+				return fmt.Errorf("mcp_servers[%q]: transport %q does not allow url", name, srv.Transport)
+			}
+			if len(srv.Headers) > 0 {
+				return fmt.Errorf("mcp_servers[%q]: transport %q does not allow headers", name, srv.Transport)
+			}
+		case MCPTransportSSE, MCPTransportStreamableHTTP:
+			if srv.URL == "" {
+				return fmt.Errorf("mcp_servers[%q]: transport %q requires url", name, srv.Transport)
+			}
+			if srv.Command != "" {
+				return fmt.Errorf("mcp_servers[%q]: transport %q does not allow command", name, srv.Transport)
+			}
+			if len(srv.Args) > 0 {
+				return fmt.Errorf("mcp_servers[%q]: transport %q does not allow args", name, srv.Transport)
+			}
+			if len(srv.Env) > 0 {
+				return fmt.Errorf("mcp_servers[%q]: transport %q does not allow env", name, srv.Transport)
+			}
+		case "":
+			return fmt.Errorf("mcp_servers[%q]: missing required field: transport", name)
+		default:
+			return fmt.Errorf("mcp_servers[%q]: invalid transport %q (must be %q, %q, or %q)",
+				name, srv.Transport, MCPTransportStdio, MCPTransportSSE, MCPTransportStreamableHTTP)
+		}
+		switch srv.Scope {
+		case "", MCPScopeGlobal, MCPScopeProject:
+			// valid (empty defaults to global at provisioning time)
+		default:
+			return fmt.Errorf("mcp_servers[%q]: invalid scope %q (must be %q or %q)",
+				name, srv.Scope, MCPScopeGlobal, MCPScopeProject)
+		}
+	}
+	return nil
+}
+
+// isValidMCPName accepts alphanumeric names with optional hyphens or underscores
+// (no leading/trailing punctuation). Mirrors slug rules used elsewhere but
+// permits underscores too, since MCP server names commonly use them.
+func isValidMCPName(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i, c := range s {
+		switch {
+		case c >= 'a' && c <= 'z':
+		case c >= 'A' && c <= 'Z':
+		case c >= '0' && c <= '9':
+		case (c == '-' || c == '_') && i > 0 && i < len(s)-1:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // ValidateServices validates a slice of ServiceSpec entries.
 func ValidateServices(services []ServiceSpec) error {
 	seen := make(map[string]bool, len(services))
@@ -321,11 +425,15 @@ type ScionConfig struct {
 	Resources        *ResourceSpec     `json:"resources,omitempty" yaml:"resources,omitempty"`
 	Image            string            `json:"image,omitempty" yaml:"image,omitempty"`
 	Services         []ServiceSpec     `json:"services,omitempty" yaml:"services,omitempty"`
-	MaxTurns         int               `json:"max_turns,omitempty" yaml:"max_turns,omitempty"`
-	MaxModelCalls    int               `json:"max_model_calls,omitempty" yaml:"max_model_calls,omitempty"`
-	MaxDuration      string            `json:"max_duration,omitempty" yaml:"max_duration,omitempty"`
-	Hub              *AgentHubConfig   `json:"hub,omitempty" yaml:"hub,omitempty"`
-	Telemetry        *TelemetryConfig  `json:"telemetry,omitempty" yaml:"telemetry,omitempty"`
+	// MCPServers is the universal MCP server map. Keys are server names; values
+	// are the transport-agnostic config translated by each harness's
+	// container-side provisioner into native format.
+	MCPServers    map[string]MCPServerConfig `json:"mcp_servers,omitempty" yaml:"mcp_servers,omitempty"`
+	MaxTurns      int                        `json:"max_turns,omitempty" yaml:"max_turns,omitempty"`
+	MaxModelCalls int                        `json:"max_model_calls,omitempty" yaml:"max_model_calls,omitempty"`
+	MaxDuration   string                     `json:"max_duration,omitempty" yaml:"max_duration,omitempty"`
+	Hub           *AgentHubConfig            `json:"hub,omitempty" yaml:"hub,omitempty"`
+	Telemetry     *TelemetryConfig           `json:"telemetry,omitempty" yaml:"telemetry,omitempty"`
 
 	Secrets []RequiredSecret `json:"secrets,omitempty" yaml:"secrets,omitempty"`
 

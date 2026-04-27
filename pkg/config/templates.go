@@ -119,6 +119,10 @@ func (t *Template) LoadConfig() (*api.ScionConfig, error) {
 		return nil, fmt.Errorf("invalid services config in %s: %w", configPath, err)
 	}
 
+	if err := api.ValidateMCPServers(cfg.MCPServers); err != nil {
+		return nil, fmt.Errorf("invalid mcp_servers config in %s: %w", configPath, err)
+	}
+
 	return &cfg, nil
 }
 
@@ -679,6 +683,16 @@ func MergeScionConfig(base, override *api.ScionConfig) *api.ScionConfig {
 	}
 	if override.Services != nil {
 		result.Services = override.Services
+	}
+	if override.MCPServers != nil {
+		merged := make(map[string]api.MCPServerConfig, len(base.MCPServers)+len(override.MCPServers))
+		for k, v := range base.MCPServers {
+			merged[k] = v
+		}
+		for k, v := range override.MCPServers {
+			merged[k] = v
+		}
+		result.MCPServers = merged
 	}
 	if override.MaxTurns > 0 {
 		result.MaxTurns = override.MaxTurns

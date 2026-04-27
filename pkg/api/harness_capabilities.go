@@ -56,6 +56,18 @@ type HarnessAuthCapabilities struct {
 	VertexAI   CapabilityField `json:"vertex_ai" yaml:"vertex_ai"`
 }
 
+// HarnessMCPCapabilities describes MCP transport support for a harness.
+// Stdio is the most common; SSE and streamable-http vary by harness version.
+// ProjectScope describes whether the harness distinguishes per-project MCP
+// registration from global; harnesses that do not (Gemini, OpenCode) report
+// no support and provisioners treat project-scoped servers as global.
+type HarnessMCPCapabilities struct {
+	Stdio          CapabilityField `json:"stdio" yaml:"stdio"`
+	SSE            CapabilityField `json:"sse" yaml:"sse"`
+	StreamableHTTP CapabilityField `json:"streamable_http" yaml:"streamable_http"`
+	ProjectScope   CapabilityField `json:"project_scope" yaml:"project_scope"`
+}
+
 // HarnessAdvancedCapabilities describes advanced field support for a harness.
 type HarnessAdvancedCapabilities struct {
 	Harness   string                       `json:"harness" yaml:"harness,omitempty"`
@@ -63,4 +75,5 @@ type HarnessAdvancedCapabilities struct {
 	Telemetry HarnessTelemetryCapabilities `json:"telemetry" yaml:"telemetry"`
 	Prompts   HarnessPromptCapabilities    `json:"prompts" yaml:"prompts"`
 	Auth      HarnessAuthCapabilities      `json:"auth" yaml:"auth"`
+	MCP       HarnessMCPCapabilities       `json:"mcp" yaml:"mcp"`
 }
