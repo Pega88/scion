@@ -19,6 +19,12 @@
 # Note: Long-building images (core-base) have build/push split into separate
 # steps to avoid OAuth token expiration. The push step gets a fresh token.
 steps:
+  # Pre-flight: verify push access to catch permission errors early
+  - name: 'gcr.io/cloud-builders/gcloud'
+    id: 'verify-registry'
+    entrypoint: 'bash'
+    args: ['image-build/scripts/verify-registry.sh', '$_REGISTRY']
+
   # Enable multi-arch builds
   - name: 'gcr.io/cloud-builders/docker'
     id: 'setup-buildx'
