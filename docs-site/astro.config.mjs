@@ -25,7 +25,7 @@ export default defineConfig({
 	site: 'https://googlecloudplatform.github.io',
 	base: '/scion',
 	integrations: [
-		d2(),
+		d2({ experimental: { useD2js: true } }),
 		starlight({
 			plugins: [starlightLinksValidator()],
 			title: 'Scion',
