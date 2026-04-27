@@ -71,7 +71,7 @@ export default defineConfig({
         emptyOutDir: true,
         rollupOptions: {
             input: {
-                main: resolve(__dirname, 'index.html'),
+                main: resolve(__dirname, 'src/client/main.ts'),
             },
             output: {
                 // Use consistent naming for SSR compatibility
