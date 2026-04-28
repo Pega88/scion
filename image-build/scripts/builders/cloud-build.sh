@@ -104,13 +104,19 @@ builder_run_target() {
     fi
   fi
 
-  # SHORT_SHA / COMMIT_SHA are computed once by the orchestrator. Fall back
-  # to "unknown" when the working tree is not a git repo so the substitution
-  # is always populated (Cloud Build rejects unset substitutions).
+  # Only pass substitutions that the template actually references.
+  # Cloud Build rejects any key in --substitutions that is not matched
+  # (referenced) in the template steps.
   local short_sha="${SHORT_SHA:-unknown}"
   local commit_sha="${COMMIT_SHA:-unknown}"
 
-  local subs="_TAG=${tag},_SHORT_SHA=${short_sha},_COMMIT_SHA=${commit_sha}"
+  local subs="_TAG=${tag}"
+  if grep -q '_SHORT_SHA' "${config}"; then
+    subs="${subs},_SHORT_SHA=${short_sha}"
+  fi
+  if grep -q '_COMMIT_SHA' "${config}"; then
+    subs="${subs},_COMMIT_SHA=${commit_sha}"
+  fi
   if [[ -n "${registry}" ]]; then
     subs="${subs},_REGISTRY=${registry}"
   fi
