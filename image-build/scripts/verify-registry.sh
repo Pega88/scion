@@ -68,7 +68,4 @@ if ! echo "$response" | grep -q "uploadArtifacts"; then
   exit 1
 fi
 
-# 3. Ensure the Docker credential helper is configured for this registry host.
-gcloud auth configure-docker "$reg_host" --quiet 2>/dev/null || true
-
 echo "Registry access verified: $REGISTRY"
