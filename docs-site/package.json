@@ -19,7 +19,7 @@
     "typescript": "^5.9.3"
   },
   "devDependencies": {
-    "astro-d2": "^0.8.1"
+    "astro-d2": "^0.10.0"
   },
   "engines": {
     "node": ">=22"
