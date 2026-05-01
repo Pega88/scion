@@ -21,12 +21,12 @@ import (
 	"log/slog"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/GoogleCloudPlatform/scion/pkg/messages"
 	"github.com/GoogleCloudPlatform/scion/pkg/plugin"
 	goplugin "github.com/hashicorp/go-plugin"
 )
-
 // MessageHandler is called when a message is received from the Hub via the broker plugin.
 type MessageHandler func(ctx context.Context, topic string, msg *messages.StructuredMessage) error
 
@@ -136,9 +136,35 @@ func (b *BrokerServer) HealthCheck() (*plugin.HealthStatus, error) {
 // SetHostCallbacks is called by the go-plugin framework to provide the reverse channel.
 func (b *BrokerServer) SetHostCallbacks(hc plugin.HostCallbacks) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	b.hostCallbacks = hc
+	subs := make([]string, 0, len(b.subscriptions))
+	for p := range b.subscriptions {
+		subs = append(subs, p)
+	}
+	b.mu.Unlock()
+	
 	b.log.Info("host callbacks connected")
+
+	go func() {
+		for _, pattern := range subs {
+			// Retry loop since the host forwarder may not have its underlying implementation set immediately.
+			for i := 0; i < 10; i++ {
+				err := hc.RequestSubscription(pattern)
+				if err == nil {
+					b.log.Info("subscribed to deferred pattern", "pattern", pattern)
+					break
+				}
+				
+				if err.Error() == "host callbacks not yet available" {
+					b.log.Debug("host callbacks not ready yet, retrying...", "pattern", pattern, "attempt", i+1)
+					time.Sleep(time.Second)
+				} else {
+					b.log.Error("failed to request deferred subscription", "pattern", pattern, "error", err)
+					break
+				}
+			}
+		}
+	}()
 }
 
 // HostCallbacks returns the host callbacks interface (for requesting subscriptions).
@@ -150,6 +176,10 @@ func (b *BrokerServer) HostCallbacks() plugin.HostCallbacks {
 
 // RequestSubscription asks the Hub to subscribe this plugin to a topic pattern.
 func (b *BrokerServer) RequestSubscription(pattern string) error {
+	b.mu.Lock()
+	b.subscriptions[pattern] = true
+	b.mu.Unlock()
+
 	hc := b.HostCallbacks()
 	if hc == nil {
 		return fmt.Errorf("host callbacks not available")

@@ -241,8 +241,7 @@ substep "Installing systemd unit"
 cat > "${TMPDIR}/scion-chat-app.service" <<EOF
 [Unit]
 Description=Scion Chat App
-After=network.target scion-hub.service
-Wants=scion-hub.service
+After=network.target
 
 [Service]
 User=scion
