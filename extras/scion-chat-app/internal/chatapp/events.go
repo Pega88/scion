@@ -22,6 +22,7 @@ type ChatEvent struct {
 	ThreadID       string
 	UserID         string
 	UserEmail      string // user's email from the chat platform (Google-asserted identity)
+	UserDisplayName string
 	Text           string
 	Command        string
 	Args           string

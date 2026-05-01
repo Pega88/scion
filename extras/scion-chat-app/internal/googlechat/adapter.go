@@ -441,6 +441,7 @@ func (a *Adapter) normalizeEvent(raw *rawEvent) *chatapp.ChatEvent {
 	if raw.Chat.User != nil {
 		event.UserID = raw.Chat.User.Name
 		event.UserEmail = raw.Chat.User.Email
+		event.UserDisplayName = raw.Chat.User.DisplayName
 	}
 
 	// Extract parameters from commonEventObject.
@@ -800,13 +801,13 @@ func (a *Adapter) renderWidget(w *chatapp.Widget) map[string]any {
 	case chatapp.WidgetText:
 		return map[string]any{
 			"textParagraph": map[string]any{
-				"text": w.Content,
+				"text": strings.ReplaceAll(w.Content, "\n", "<br>"),
 			},
 		}
 	case chatapp.WidgetKeyValue:
 		decorated := map[string]any{
 			"topLabel": w.Label,
-			"text":     w.Content,
+			"text":     strings.ReplaceAll(w.Content, "\n", "<br>"),
 		}
 		return map[string]any{
 			"decoratedText": decorated,

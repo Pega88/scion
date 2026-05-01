@@ -952,6 +952,20 @@ func (r *CommandRouter) cmdMessage(ctx context.Context, event *ChatEvent, args [
 		return textResponse(event, fmt.Sprintf("Failed to send message to `%s`: %v", agentSlug, err)), nil
 	}
 
+	// Send a visible message so other space members can see what was sent.
+	displayName := event.UserDisplayName
+	if displayName == "" {
+		displayName = event.UserEmail
+	}
+	visibleText := fmt.Sprintf("Message from *%s* sent to *%s*:\n%s", displayName, agentSlug, messageText)
+	if _, err := r.messenger.SendMessage(ctx, SendMessageRequest{
+		SpaceID:  event.SpaceID,
+		ThreadID: event.ThreadID,
+		Text:     visibleText,
+	}); err != nil {
+		r.log.Error("failed to send visible message confirmation", "error", err)
+	}
+
 	replyText := fmt.Sprintf("Message sent to agent `%s`.", agentSlug)
 	if threadID != "" {
 		replyText += fmt.Sprintf(" (thread: `%s`)", threadID)
