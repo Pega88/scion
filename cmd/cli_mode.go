@@ -47,6 +47,7 @@ var agentAllowed = map[string]bool{
 	"start":                       true,
 	"stop":                        true,
 	"version":                     true,
+	"whoami":                      true,
 	"config":                      true,
 	"config.list":                 true,
 	"config.get":                  true,
